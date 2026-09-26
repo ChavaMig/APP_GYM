@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0d0e11">
+  <meta name="description" content="Mi entrenamiento, mis pesos, mi progreso">
+  <title>IRON · Mi Gym</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="IRON">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="boot" class="boot"><div class="boot-logo"></div></div>
+
+  <header class="topbar" id="topbar">
+    <button id="back" class="icon-btn ghost hidden" data-act="back" aria-label="Volver">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></button>
+    <div class="brand" id="brand"><span class="brand-mark"></span><span class="brand-name">IRON</span></div>
+    <div class="topbar-right">
+      <span id="sync" class="pill-sync"></span>
+      <button id="avatar" class="avatar" data-act="go" data-v="perfil" aria-label="Perfil"></button>
+    </div>
+  </header>
+
+  <main id="view"></main>
+
+  <!-- Temporizador de descanso: barra fija por encima de las pestañas -->
+  <div id="rest" class="rest hidden" role="timer" aria-label="Temporizador de descanso">
+    <div id="rest-bar" class="rest-fill"></div>
+    <div class="rest-content">
+      <span class="rest-label">Descanso</span>
+      <span id="rest-time" class="rest-time">1:30</span>
+      <button class="sm" data-act="rest-add" data-s="-15" aria-label="Quitar 15 segundos">−15</button>
+      <button class="sm" data-act="rest-add" data-s="15" aria-label="Añadir 15 segundos">+15</button>
+      <button class="sm ghost rest-close" data-act="rest-stop" aria-label="Cerrar temporizador">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+          stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+  </div>
+
+  <canvas id="confetti" class="confetti hidden" aria-hidden="true"></canvas>
+
+  <nav class="tabbar" id="tabbar"></nav>
+
+  <dialog id="dlg"><div id="dlg-body"></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
