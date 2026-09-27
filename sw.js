@@ -1,22 +1,23 @@
 // Service worker: la app abre sin conexión.
 // Cada vez que cambies archivos, sube este numero (v6, v7...).
-const VERSION = 'iron-v6';
+const VERSION = 'iron-v8';
 const APP_FILES = [
   './', './index.html', './style.css', './app.js', './ui.js', './store.js', './firebase-config.js',
-  './db.js', './anim.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png',
+  './db.js', './anim.js', './auth.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png',
 ];
 const RUNTIME_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com', 'www.gstatic.com'];
+const CACHE_EXTERNO = 'iron-externo';   // tipografías y SDK: se conservan entre versiones
 const NET_TIMEOUT = 2500;   // con cobertura mala, tiramos de caché en vez de esperar
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION)
-    .then(c => Promise.allSettled(APP_FILES.map(f => c.add(f))))
+    .then(c => c.addAll(APP_FILES))
     .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys()
-    .then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k))))
+    .then(keys => Promise.all(keys.filter(k => k !== VERSION && k !== CACHE_EXTERNO).map(k => caches.delete(k))))
     .then(() => self.clients.claim()));
 });
 
@@ -43,8 +44,8 @@ self.addEventListener('fetch', e => {
       return (await cached) || res;
     });
     const fallback = () => cached
-      .then(r => r || caches.match('./index.html'))
-      .then(r => r || net)
+      .then(r => r || (e.request.mode === 'navigate' ? caches.match('./index.html') : null))
+      .then(r => r || net.catch(() => null))
       .then(r => r || Response.error());
     e.respondWith(
       Promise.race([
@@ -58,7 +59,10 @@ self.addEventListener('fetch', e => {
   // Tipografías y librerías de Firebase (versión fija): caché primero.
   if (RUNTIME_HOSTS.includes(url.hostname)) {
     e.respondWith(
-      caches.match(e.request).then(r => r || fetch(e.request).then(res => save(e.request, res)).catch(() => r))
+      caches.match(e.request).then(r => r || fetch(e.request).then(res => {
+        if (res.ok) { const c = res.clone(); caches.open(CACHE_EXTERNO).then(k => k.put(e.request, c)).catch(() => {}); }
+        return res;
+      }).catch(() => r))
     );
   }
   // El resto (Firestore, login de Google) va directo a la red.

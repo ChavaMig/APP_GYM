@@ -1,6 +1,7 @@
 import { firebaseConfig, OWNER_EMAIL, OWNER_EMAIL_SHA256 } from './firebase-config.js';
 import { LocalStore, FirebaseStore } from './store.js';
-import { EXERCISES, PLANTILLAS, GROUPS, GROUP_COLOR, EQUIP, MUSCLES, VOLUMEN_OBJETIVO, byId, GRUPO_MUSCULO, NOMBRES_ANTIGUOS } from './db.js';
+import { EXERCISES, PLANTILLAS, SEMANA, DIAS, GROUPS, GROUP_COLOR, EQUIP, MUSCLES, VOLUMEN_OBJETIVO, byId, GRUPO_MUSCULO, NOMBRES_ANTIGUOS } from './db.js';
+import { hayCuenta, haySesion, nombreCuenta, registrar, entrar, salir, cambiarPassword, quitarCuenta, renovarSesion, cifradoDisponible } from './auth.js';
 import { exerciseSVG } from './anim.js';
 import { icon, injectDefs, lineChart, weekBars, goalRing, bodyMap, calendarHeat, plateView, celebrate } from './ui.js';
 
@@ -158,6 +159,7 @@ function bmi() {
 }
 // Discos por lado para llegar a un peso
 function discos(objetivo, barra = 20) {
+  if (!(objetivo > 0) || objetivo > 1000) return null;
   const disponibles = [25, 20, 15, 10, 5, 2.5, 1.25];
   let porLado = (objetivo - barra) / 2, out = [];
   if (porLado < 0) return null;
@@ -175,6 +177,7 @@ const TABS = [
 ];
 function go(v, id) { S.route = { v, id }; render(); scrollTo({ top: 0 }); }
 const VOLVER = { ejercicio: 'ejercicios', historial: 'inicio', calendario: 'progreso', plantillas: 'entrenar' };
+const aDondeVuelvo = () => (S.route.v === 'ejercicio' && S.active ? 'entrenar' : VOLVER[S.route.v] || 'inicio');
 
 function renderTabs() {
   $('#tabbar').innerHTML = TABS.map(([id, label, ic]) => `
@@ -278,6 +281,9 @@ const prItem = (p, i) => `
 function sugerirRutina() {
   const rs = S.data.routines;
   if (!rs.length) return null;
+  const hoy = ((new Date().getDay() + 6) % 7) + 1;   // 1 = lunes … 7 = domingo
+  const deHoy = rs.find(r => r.dia === hoy);
+  if (deHoy) return { rutina: deHoy, motivo: `hoy es ${DIAS[hoy].toLowerCase()}` };
   const uso = {};
   for (const w of [...S.data.workouts].sort(byDate)) if (w.routineId) uso[w.routineId] = w.date;
   const orden = [...rs].sort((a, b) => ((uso[a.id] || '0') < (uso[b.id] || '0') ? -1 : 1));
@@ -290,12 +296,12 @@ function rutinaCard(r, destacada = false) {
   return `<div class="routine ${destacada ? 'destacada' : ''}">
     <div class="routine-top">
       <div class="grow"><h3>${esc(r.name)}</h3>
-        <span class="muted small">${r.exerciseIds.length} ejercicios</span></div>
+        <span class="muted small">${r.exerciseIds.length} ejercicios${r.dia ? ` · ${DIAS[r.dia]}` : ''}</span></div>
       <div class="mini-figs">${r.exerciseIds.slice(0, 3).map(id =>
         `<div class="mini-fig">${exerciseSVG(exById(id)?.pose || 'curl', { anim: false })}</div>`).join('')}</div>
     </div>
     <div class="chips" style="margin:10px 0 12px">
-      ${grupos.map(g => `<span class="tag m" style="--mc:${GROUP_COLOR[g] || '#8d96a7'}">${g}</span>`).join('')}</div>
+      ${grupos.map(g => `<span class="tag m" style="--mc:${GROUP_COLOR[g] || '#8d96a7'}">${esc(g)}</span>`).join('')}</div>
     <div class="row nowrap">
       <button class="primary grow" data-act="start" data-id="${r.id}">${icon('play', 18)} Empezar</button>
       <button class="icon-btn" data-act="edit-routine" data-id="${r.id}" aria-label="Editar rutina">${icon('editar', 18)}</button>
@@ -320,6 +326,14 @@ function viewEntrenar() {
             <button data-act="edit-routine">${icon('mas', 18)} Crear la mía</button>
           </div></div>`}
     <button class="block" data-act="start" style="margin-top:6px">${icon('rayo', 18)} Entreno libre</button>
+    ${S.data.routines.some(r => r.dia) ? '' : `
+      <div class="card" style="margin-top:16px">
+        <div class="row nowrap">${icon('calendario', 20)}<div class="grow">
+          <b>Semana completa de ejemplo</b>
+          <div class="muted small">Siete rutinas listas, una para cada día: pecho, espalda, pierna, hombro, empuje y tirón, glúteo y cardio, y descanso activo.</div>
+        </div></div>
+        <button class="primary block" style="margin-top:10px" data-act="cargar-semana">Añadir las 7 rutinas</button>
+      </div>`}
   </div>`;
 }
 
@@ -327,6 +341,11 @@ function viewPlantillas() {
   return `<div class="stagger">
     <div class="section-head"><h2>Plantillas de rutina</h2></div>
     <p class="muted small">Rutinas ya montadas. Al añadirlas se copian a las tuyas y puedes cambiarlas a tu gusto.</p>
+    <div class="card">
+      <div class="row nowrap">${icon('calendario', 20)}<div class="grow"><b>Semana completa (7 días)</b>
+        <div class="muted small">Una rutina para cada día, ya asignada a su día de la semana.</div></div></div>
+      <button class="primary block" style="margin-top:10px" data-act="cargar-semana">Añadir las 7 rutinas</button>
+    </div>
     ${PLANTILLAS.map(p => `
       <div class="card">
         <div class="row between"><h3>${esc(p.n)}</h3>
@@ -349,7 +368,7 @@ function viewLive() {
       <div class="row between nowrap">
         <div class="grow"><span class="tiny"><i class="rec-dot"></i> Entrenando</span>
           <input data-bind="name" value="${esc(a.name)}" maxlength="60" aria-label="Nombre del entreno" class="live-name"></div>
-        <input type="date" data-bind="date" value="${a.date}" max="${todayISO()}" class="live-date" aria-label="Fecha">
+        <input type="date" data-bind="date" value="${a.date}" min="${daysAgoISO(3650)}" max="${todayISO()}" class="live-date" aria-label="Fecha">
       </div>
       <div class="live-metrics">
         <div><b id="elapsed">${elapsed()}</b><span class="tiny">tiempo</span></div>
@@ -368,7 +387,8 @@ function viewLive() {
     <div class="fab-row">
       <button class="primary grow" data-act="finish">${icon('check', 18)} Terminar y guardar</button>
       <button class="danger" data-act="discard" aria-label="Descartar entreno">${icon('papelera', 18)}</button>
-    </div>`;
+    </div>
+    <div class="fab-space"></div>`;
 }
 
 function exCard(en, ei) {
@@ -388,7 +408,7 @@ function exCard(en, ei) {
           ${exerciseSVG(ex?.pose || 'curl', { anim: false })}</div>
         <div class="grow">
           <h3>${esc(ex?.n || 'Ejercicio')}</h3>
-          <span class="tag m" style="--mc:${GROUP_COLOR[g] || '#8d96a7'}">${g}</span>
+          <span class="tag m" style="--mc:${GROUP_COLOR[g] || '#8d96a7'}">${esc(g)}</span>
         </div>
         <button class="icon-btn ghost" data-act="ex-menu" data-ei="${ei}" aria-label="Opciones">${icon('mas-opciones', 18)}</button>
       </div>
@@ -420,6 +440,19 @@ function exCard(en, ei) {
         </div>
       </div>
     </div>`;
+}
+// Refresca volumen y series de la cabecera sin repintar toda la pantalla
+function actualizarCabecera() {
+  const a = S.active, cab = document.querySelector('.live-metrics');
+  if (!a || !cab) return;
+  const vol = a.entries.reduce((t, e) => t + e.sets.reduce((b, x) => b + num(x.kg) * num(x.reps), 0), 0);
+  const hechas = a.entries.reduce((t, e) => t + e.sets.filter(x => x.done).length, 0);
+  const total = a.entries.reduce((t, e) => t + e.sets.length, 0);
+  const b = cab.querySelectorAll('b');
+  if (b[1]) b[1].textContent = kfmt(vol);
+  if (b[2]) b[2].textContent = `${hechas}/${total}`;
+  const barra = document.querySelector('.progress-line i');
+  if (barra) barra.style.width = `${total ? (hechas / total) * 100 : 0}%`;
 }
 const elapsed = () => {
   const m = Math.floor((Date.now() - (S.active?.startedAt || Date.now())) / 60000);
@@ -455,7 +488,7 @@ function viewEjercicios() {
           <div class="ex-demo sm">${exerciseSVG(e.pose, { anim: false })}</div>
           <div class="ex-tile-txt">
             <b>${esc(e.n)}</b>
-            <span class="tag m" style="--mc:${GROUP_COLOR[e.g] || '#8d96a7'}">${e.g}</span>
+            <span class="tag m" style="--mc:${GROUP_COLOR[e.g] || '#8d96a7'}">${esc(e.g)}</span>
             <span class="tiny">${EQUIP[e.eq] || ''}</span>
           </div>
           ${favoritos().includes(e.id) ? `<span class="fav-mark">${icon('estrella', 14)}</span>` : ''}
@@ -483,12 +516,12 @@ function viewFichaEjercicio() {
       <button class="icon-btn ${fav ? 'on' : ''}" data-act="fav" data-id="${e.id}" aria-label="Favorito">${icon('estrella', 18)}</button>
     </div>
     <div class="chips" style="margin:8px 0 4px">
-      <span class="tag m" style="--mc:${GROUP_COLOR[e.g] || '#8d96a7'}">${e.g}</span>
+      <span class="tag m" style="--mc:${GROUP_COLOR[e.g] || '#8d96a7'}">${esc(e.g)}</span>
       <span class="tag">${EQUIP[e.eq] || 'Otro'}</span>
       ${dif ? `<span class="tag">${dif}</span>` : ''}
     </div>
     <div class="chips" style="margin-bottom:12px">
-      ${e.m.map(m => `<span class="chip sm">${MUSCLES[m] || m}</span>`).join('')}
+      ${e.m.map(m => `<span class="chip sm">${esc(MUSCLES[m] || m)}</span>`).join('')}
     </div>
 
     <div class="row">
@@ -682,7 +715,7 @@ function viewPerfil() {
     <div class="section-head"><h2>Peso corporal</h2></div>
     <div class="card">
       <div class="row nowrap" style="margin-bottom:10px">
-        <input type="date" id="bw-date" value="${todayISO()}" max="${todayISO()}" style="width:auto" aria-label="Fecha">
+        <input type="date" id="bw-date" value="${todayISO()}" min="${daysAgoISO(3650)}" max="${todayISO()}" style="width:auto" aria-label="Fecha">
         <input id="bw-kg" class="grow" inputmode="decimal" placeholder="kg" aria-label="Peso">
         <button class="primary" data-act="add-bw" aria-label="Añadir peso">${icon('mas', 18)}</button>
       </div>
@@ -705,8 +738,16 @@ function viewPerfil() {
         <div class="row nowrap" style="margin-bottom:12px">${icon('candado', 20)}
           <div class="grow"><b>App privada</b><div class="muted small">Solo tu cuenta puede entrar.</div></div></div>
         <button class="block" data-act="logout">${icon('salir', 18)} Cerrar sesión</button>`
-      : `<div class="row nowrap">${icon('movil', 20)}<div class="grow"><b>Modo local</b>
-          <div class="muted small">Los datos se guardan solo en este navegador. Configura Firebase (paso 2 del README) para sincronizar y bloquear el acceso.</div></div></div>`}
+      : `<div class="row nowrap" style="margin-bottom:12px">${icon('usuario', 20)}<div class="grow">
+            <b>Cuenta de este dispositivo${nombreCuenta() ? `: ${esc(nombreCuenta())}` : ''}</b>
+            <div class="muted small">Te pide la contraseña al abrir la app y cada 7 días.
+              Es un candado sencillo: evita que alguien curiosee, pero no cifra los entrenos.
+              Protección de verdad = modo nube con Firebase.</div></div></div>
+          <div class="row">
+            <button class="grow" data-act="cambiar-pass">${icon('candado', 18)} Cambiar contraseña</button>
+            <button class="grow" data-act="logout-local">${icon('salir', 18)} Cerrar sesión</button>
+          </div>
+          <p class="tiny" style="margin:12px 0 0">Para sincronizar con el móvil y proteger los datos de verdad, configura Firebase.</p>`}
     </div>
 
     <div class="section-head"><h2>Copia de seguridad</h2></div>
@@ -785,6 +826,11 @@ function editorRutina(r) {
   openDialog(`
     <label><span>Nombre de la rutina</span>
       <input id="rt-name" value="${esc(r?.name || '')}" maxlength="60" placeholder="Ej: Día de pecho"></label>
+    <label><span>Día de la semana (opcional)</span>
+      <select id="rt-dia">
+        <option value="">Sin día fijo</option>
+        ${DIAS.slice(1).map((d, i) => `<option value="${i + 1}" ${r?.dia === i + 1 ? 'selected' : ''}>${d}</option>`).join('')}
+      </select></label>
     <span class="tiny">Ejercicios elegidos</span>
     <ol id="rt-order" class="small lista-orden"></ol>
     ${selectorEjercicios('Toca para añadir o quitar', 'toggle-pick', S.pick)}
@@ -803,7 +849,7 @@ function dialogoDiscos(kg) {
   const r = discos(kg, barra);
   openDialog(`<h2>Calculadora de discos</h2>
     <div class="field-row" style="margin-top:12px">
-      <label><span>Peso total (kg)</span><input id="dk" inputmode="decimal" value="${fmt(kg)}"></label>
+      <label><span>Peso total (kg)</span><input id="dk" inputmode="decimal" maxlength="6" value="${fmt(kg)}"></label>
       <label><span>Barra (kg)</span><input id="db" inputmode="decimal" value="${barra}"></label>
     </div>
     <button class="primary block" data-act="calc-discos">Calcular</button>
@@ -881,7 +927,7 @@ function prefillSets(exId, from) {
 
 const actions = {
   go: el => go(el.dataset.v, el.dataset.id),
-  back: () => go(VOLVER[S.route.v] || 'inicio'),
+  back: () => go(aDondeVuelvo()),
 
   start: el => {
     const r = S.data.routines.find(x => x.id === el.dataset.id);
@@ -930,7 +976,7 @@ const actions = {
     const r = S.data.routines.find(x => x.id === el.dataset.r);
     if (r.exerciseIds.includes(el.dataset.id)) { closeDialog(); return toast('Ya estaba en esa rutina'); }
     upsert('routines', { ...r, exerciseIds: [...r.exerciseIds, el.dataset.id] });
-    closeDialog(); toast(`Añadido a ${r.name}`);
+    closeDialog(); toast(`Añadido a ${esc(r.name)}`);
   },
   'ex-menu': el => {
     const ei = +el.dataset.ei, en = S.active.entries[ei];
@@ -940,14 +986,26 @@ const actions = {
         <button data-act="go" data-v="ejercicio" data-id="${en.exerciseId}">${icon('libro', 18)} Ver ficha y técnica</button>
         ${ei > 0 ? `<button data-act="move-entry" data-ei="${ei}" data-dir="-1">${icon('subir', 18)} Subir</button>` : ''}
         ${ei < n - 1 ? `<button data-act="move-entry" data-ei="${ei}" data-dir="1">${icon('bajar', 18)} Bajar</button>` : ''}
-        ${ei < n - 1 ? `<button data-act="superserie" data-ei="${ei}">${icon('enlace', 18)} ${en.ss ? 'Quitar superserie' : 'Superserie con el siguiente'}</button>` : ''}
+        ${ei < n - 1 ? `<button data-act="superserie" data-ei="${ei}">${icon('enlace', 18)} ${en.ss && S.active.entries[ei + 1]?.ss === en.ss ? 'Separar del siguiente' : 'Enlazar con el siguiente'}</button>` : ''}
+        ${en.ss ? `<button data-act="quitar-ss" data-ei="${ei}">${icon('cerrar', 18)} Deshacer la superserie</button>` : ''}
         <button class="danger" data-act="del-entry" data-ei="${ei}">${icon('papelera', 18)} Quitar del entreno</button>
         <button class="ghost" data-act="close">Cerrar</button></div>`);
   },
   superserie: el => {
     const i = +el.dataset.ei, e = S.active.entries;
-    if (e[i].ss) { const g = e[i].ss; e.forEach(x => { if (x.ss === g) delete x.ss; }); }
-    else { const g = uid(); e[i].ss = g; e[i + 1].ss = g; }
+    if (e[i].ss && e[i + 1]?.ss === e[i].ss) {       // separar
+      const g = e[i].ss;
+      e.slice(i + 1).forEach(x => { if (x.ss === g) delete x.ss; });
+      if (e.filter(x => x.ss === g).length < 2) e.forEach(x => { if (x.ss === g) delete x.ss; });
+    } else {                                          // enlazar (y encadenar más de dos)
+      const g = e[i].ss || uid();
+      e[i].ss = g; e[i + 1].ss = g;
+    }
+    saveActive(); closeDialog(); render();
+  },
+  'quitar-ss': el => {
+    const g = S.active.entries[+el.dataset.ei].ss;
+    S.active.entries.forEach(x => { if (x.ss === g) delete x.ss; });
     saveActive(); closeDialog(); render();
   },
   'del-entry': el => {
@@ -965,7 +1023,13 @@ const actions = {
     sets.push({ kg: prev?.kg ?? '', reps: prev?.reps ?? '', done: false });
     saveActive(); render();
   },
-  'del-set': el => { S.active.entries[+el.dataset.ei].sets.pop(); saveActive(); render(); },
+  'del-set': el => {
+    const sets = S.active.entries[+el.dataset.ei].sets, ult = sets.at(-1);
+    if (!ult) return;
+    const conDatos = ult.done || num(ult.kg) > 0 || num(ult.reps) > 0;
+    if (conDatos && !confirm('Esa serie tiene datos. ¿Borrarla igualmente?')) return;
+    sets.pop(); saveActive(); render();
+  },
   'aplicar-sug': el => {
     const ei = +el.dataset.ei, en = S.active.entries[ei];
     const s = sugerencia(en.exerciseId, S.active.editingId);
@@ -1010,6 +1074,8 @@ const actions = {
     const entries = a.entries
       .map(e => ({ exerciseId: e.exerciseId, ss: e.ss || null, sets: e.sets.filter(s => num(s.reps) > 0).map(s => ({ kg: num(s.kg), reps: Math.round(num(s.reps)) })) }))
       .filter(e => e.sets.length);
+    const raro = a.entries.some(e => e.sets.some(x => num(x.kg) < 0 || num(x.kg) > 1000 || num(x.reps) > 1000));
+    if (raro) return toast('Revisa las series: hay pesos o repeticiones imposibles (máximo 1000)');
     if (!entries.length) return toast('Apunta al menos una serie con repeticiones');
     const sinReps = a.entries.reduce((t, e) => t + e.sets.filter(s => !(num(s.reps) > 0)).length, 0);
     if (sinReps && !confirm(`Hay ${sinReps} serie${sinReps === 1 ? '' : 's'} sin repeticiones y no se guardará${sinReps === 1 ? '' : 'n'}. ¿Guardar igualmente?`)) return;
@@ -1028,7 +1094,7 @@ const actions = {
 
   discos: el => dialogoDiscos(num(el.dataset.kg)),
   'calc-discos': () => {
-    const kg = num($('#dk').value), barra = num($('#db').value) || 20;
+    const kg = Math.min(1000, Math.max(0, num($('#dk').value))), barra = Math.min(50, Math.max(0, num($('#db').value) || 20));
     profile().barra = barra; saveProfile();
     const r = discos(kg, barra);
     $('#res-discos').innerHTML = r ? plateView(r.discos, r.sobra, kg, barra) : '<p class="muted">Ese peso es menor que la barra.</p>';
@@ -1060,10 +1126,20 @@ const actions = {
     const name = $('#rt-name').value.trim();
     if (!name) return toast('Ponle nombre a la rutina');
     if (!S.pick.length) return toast('Elige al menos un ejercicio');
-    upsert('routines', { id: el.dataset.id || uid(), name, exerciseIds: [...S.pick] });
+    upsert('routines', { id: el.dataset.id || uid(), name, dia: num($('#rt-dia').value) || null, exerciseIds: [...S.pick] });
     closeDialog(); render(); toast('Rutina guardada');
   },
   'del-routine': el => { if (confirm('¿Borrar esta rutina? Tus entrenos no se borran.')) { remove('routines', el.dataset.id); render(); } },
+  'cargar-semana': () => {
+    let nuevas = 0;
+    SEMANA.forEach(d => {
+      if (S.data.routines.some(r => r.dia === d.dia)) return;
+      upsert('routines', { id: uid(), name: d.n, dia: d.dia, exerciseIds: [...d.ex] });
+      nuevas++;
+    });
+    go('entrenar');
+    toast(nuevas ? `${nuevas} rutinas añadidas, una por día` : 'Ya tenías rutinas para todos los días');
+  },
   'add-plantilla': el => {
     const p = PLANTILLAS.find(x => x.id === el.dataset.id);
     p.dias.forEach(d => upsert('routines', { id: uid(), name: d.n, exerciseIds: [...d.ex] }));
@@ -1096,12 +1172,66 @@ const actions = {
     if (kg < 20 || kg > 400) return toast('Pon un peso válido en kg');
     const date = $('#bw-date').value || todayISO();
     if (date > todayISO()) return toast('Esa fecha es del futuro');
+    if (date < daysAgoISO(3650)) return toast('Esa fecha es demasiado antigua');
     const ex = S.data.bodyweights.find(x => x.date === date);
     upsert('bodyweights', { id: ex?.id || uid(), date, kg });
     render(); toast(ex ? 'Peso actualizado' : 'Peso guardado');
   },
   'del-bw': el => { remove('bodyweights', el.dataset.id); render(); },
 
+  'reg-local': async () => {
+    const nombre = $('#rg-nombre').value.trim();
+    const p1 = $('#rg-pass').value, p2 = $('#rg-pass2').value;
+    if (!nombre) return pantallaRegistroLocal('Escribe tu nombre', nombre);
+    if (p1.length < 6) return pantallaRegistroLocal('La contraseña necesita al menos 6 caracteres', nombre);
+    if (p1 !== p2) return pantallaRegistroLocal('Las dos contraseñas no coinciden', nombre);
+    try {
+      await registrar(nombre, p1);
+      await bootData();
+      profile().name = nombre; saveProfile(); render();   // el nombre manda sobre el anterior
+      toast(`Cuenta creada. ¡A entrenar, ${esc(nombre)}!`, true);
+    } catch (e) { pantallaRegistroLocal(e.message, nombre); }
+  },
+  'login-local': async () => {
+    const pass = $('#lg-pass').value;
+    try { await entrar(pass); await bootData(); }
+    catch (e) { pantallaLoginLocal(e.message); }
+  },
+  'logout-local': () => {
+    if (!confirm('¿Cerrar sesión? Tus entrenos siguen guardados en este dispositivo.')) return;
+    salir(); location.reload();
+  },
+  olvide: () => {
+    if (!confirm('Se quitará la contraseña y podrás crear una cuenta nueva.\n\nTus entrenos NO se borran.\n\n¿Continuar?')) return;
+    quitarCuenta(); pantallaRegistroLocal();
+  },
+  'cambiar-pass': () => openDialog(`<h2>Cambiar contraseña</h2>
+    <label><span>Contraseña actual</span><input id="cp-act" type="password" autocomplete="current-password"></label>
+    <label><span>Nueva contraseña</span><input id="cp-new" type="password" autocomplete="new-password"></label>
+    <button class="primary block" data-act="guardar-pass">Guardar</button>
+    <button class="ghost block" style="margin-top:8px" data-act="close">Cancelar</button>`),
+  'guardar-pass': async () => {
+    try { await cambiarPassword($('#cp-act').value, $('#cp-new').value); closeDialog(); toast('Contraseña cambiada'); }
+    catch (e) { toast(e.message); }
+  },
+  'auth-modo': el => pantallaNube(el.dataset.m),
+  'nube-reg': async () => {
+    const mail = $('#fb-mail').value.trim(), pass = $('#fb-pass').value;
+    if (!mail || pass.length < 6) return pantallaNube('registro', 'Pon un correo válido y una contraseña de 6 caracteres o más');
+    try { await store.registrarCorreo(mail, pass); await bootData(); }
+    catch (e) { pantallaNube('registro', mensajeFirebase(e)); }
+  },
+  'nube-login': async () => {
+    const mail = $('#fb-mail').value.trim(), pass = $('#fb-pass').value;
+    try { await store.entrarCorreo(mail, pass); await bootData(); }
+    catch (e) { pantallaNube('login', mensajeFirebase(e)); }
+  },
+  'nube-reset': async () => {
+    const mail = ($('#fb-mail')?.value || '').trim();
+    if (!mail) return pantallaNube('login', 'Escribe tu correo y vuelve a pulsar para recibir el enlace');
+    try { await store.recuperarCorreo(mail); toast('Te hemos enviado un correo para cambiar la contraseña'); }
+    catch (e) { pantallaNube('login', mensajeFirebase(e)); }
+  },
   login: async () => {
     const btn = document.querySelector('[data-act="login"]');
     if (btn) { btn.disabled = true; btn.textContent = 'Abriendo Google…'; }
@@ -1124,6 +1254,19 @@ const actions = {
   close: closeDialog,
 };
 
+function mensajeFirebase(e) {
+  const c = e?.code || '';
+  if (c.includes('email-already-in-use')) return 'Ese correo ya tiene cuenta. Entra en vez de registrarte.';
+  if (c.includes('invalid-email')) return 'Ese correo no parece válido.';
+  if (c.includes('weak-password')) return 'La contraseña es demasiado corta.';
+  if (c.includes('wrong-password') || c.includes('invalid-credential')) return 'Correo o contraseña incorrectos.';
+  if (c.includes('user-not-found')) return 'No hay ninguna cuenta con ese correo.';
+  if (c.includes('too-many-requests')) return 'Demasiados intentos. Espera un momento.';
+  if (c.includes('network')) return 'Sin conexión: inténtalo otra vez.';
+  if (c === 'app/not-owner') return 'Esta app es privada: solo puede entrar su dueño.';
+  return e?.message || 'No se ha podido completar.';
+}
+
 // ═══════════ Eventos ═══════════
 document.addEventListener('click', e => {
   const tab = e.target.closest('[data-tab]');
@@ -1138,6 +1281,7 @@ document.addEventListener('input', e => {
     const tr = t.closest('tr');
     S.active.entries[+tr.dataset.ei].sets[+tr.dataset.si][t.dataset.set] = t.value;
     saveActive();
+    actualizarCabecera();
   } else if (t.dataset.bind) {
     S.active[t.dataset.bind] = t.value; saveActive();
   } else if (t.id === 'q') {
@@ -1172,12 +1316,7 @@ document.addEventListener('change', async e => {
       const d = JSON.parse(await t.files[0].text());
       if (d.app !== 'migym') throw new Error('No parece una copia de esta app');
       if (!confirm('Se añadirán los datos de la copia a los actuales. ¿Continuar?')) return;
-      const OK = {
-        workouts: w => Array.isArray(w.entries) && w.entries.every(x => x && Array.isArray(x.sets)),
-        routines: r => Array.isArray(r.exerciseIds),
-        exercises: x => typeof (x.n || x.name) === 'string',
-        bodyweights: b => typeof b.date === 'string' && isFinite(b.kg),
-      };
+      const OK = VALIDO;
       let saltados = 0;
       for (const c of ['bodyweights', 'exercises', 'routines', 'workouts']) {
         const items = (d[c] || []).filter(it => {
@@ -1186,24 +1325,47 @@ document.addEventListener('change', async e => {
           return ok;
         });
         for (const it of items) {
-          const arr = S.data[c], i = arr.findIndex(x => x.id === it.id);
-          i >= 0 ? (arr[i] = it) : arr.push(it);
+          const sano = c === 'exercises'
+            ? { ...it, n: it.n || it.name, g: GROUPS.includes(it.g) ? it.g : 'Otro', m: Array.isArray(it.m) ? it.m : ['core'],
+                eq: EQUIP[it.eq] ? it.eq : 'corporal', pose: it.pose || 'curl', dif: it.dif || 1,
+                pasos: Array.isArray(it.pasos) ? it.pasos : ['Ejercicio importado.'], tips: it.tips || [], fallos: it.fallos || [] }
+            : it;
+          const arr = S.data[c], i = arr.findIndex(x => x.id === sano.id);
+          i >= 0 ? (arr[i] = sano) : arr.push(sano);
         }
         if (store.bulkPut) store.bulkPut(c, items);
       }
-      S.data.profile = { ...S.data.profile, ...(d.profile || {}) };
+      const perf = { ...S.data.profile, ...(d.profile || {}) };
+      // Los ajustes importados también tienen que estar dentro de sus límites
+      const tope = (v, min, max) => (isFinite(v) && v >= min && v <= max ? v : '');
+      perf.heightCm = tope(num(perf.heightCm), 100, 250);
+      perf.weeklyGoal = tope(num(perf.weeklyGoal), 1, 14) || 4;
+      perf.restSec = tope(num(perf.restSec), 10, 600) || 90;
+      S.data.profile = perf;
       saveProfile();
       if (!store.bulkPut) store.put(S.data);
       migrarIds();
       render();
       toast(saltados ? `Copia importada (${saltados} registros dañados omitidos)` : 'Copia importada');
-    } catch (err) { toast('Error al importar: ' + esc(err.message)); }
+    } catch (err) {
+      const msg = /JSON/i.test(err.message) ? 'Ese archivo no es una copia válida (no se puede leer)' : err.message;
+      toast('Error al importar: ' + esc(msg));
+    }
     finally { t.value = ''; }
   }
 });
 
-addEventListener('online', render);
-addEventListener('offline', render);
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const gate = document.querySelector('.gate');
+  if (!gate || !e.target.matches('input')) return;
+  const btn = gate.querySelector('button.primary');
+  if (btn) { e.preventDefault(); btn.click(); }
+});
+
+const repintarSiListo = () => { if (S.data) render(); };
+addEventListener('online', repintarSiListo);
+addEventListener('offline', repintarSiListo);
 
 // ═══════════ Instalación ═══════════
 let deferredInstall = null;
@@ -1213,18 +1375,26 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 }
 
 // ═══════════ Migraciones ═══════════
+// Un registro solo entra si está completo: así una copia dañada no rompe la app
+export const VALIDO = {
+  workouts: w => typeof w.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(w.date) && Array.isArray(w.entries)
+    && w.entries.every(e => e && typeof e.exerciseId === 'string' && Array.isArray(e.sets)
+      && e.sets.every(x => isFinite(x?.kg) && isFinite(x?.reps))),
+  routines: r => typeof r.name === 'string' && Array.isArray(r.exerciseIds),
+  exercises: e => typeof (e.n || e.name) === 'string',
+  bodyweights: b => typeof b.date === 'string' && isFinite(b.kg) && b.kg > 0,
+};
 // La primera versión guardaba en otra clave y con otros identificadores.
 function rescatarVersionAntigua() {
   if (store.mode !== 'local') return;
   try {
     if (localStorage.getItem('iron-migrado-v1')) return;
     const viejo = JSON.parse(localStorage.getItem('migym-data-v1') || 'null');
-    localStorage.setItem('iron-migrado-v1', '1');
-    if (!viejo) return;
+    if (!viejo) { localStorage.setItem('iron-migrado-v1', '1'); return; }
     let n = 0;
     for (const c of ['bodyweights', 'exercises', 'routines', 'workouts']) {
       for (const it of viejo[c] || []) {
-        if (!it?.id) continue;
+        if (!it?.id || !VALIDO[c](it)) continue;
         const arr = S.data[c];
         if (!arr.some(x => x.id === it.id)) { arr.push(it); n++; }
       }
@@ -1234,6 +1404,7 @@ function rescatarVersionAntigua() {
       store.put(S.data);
       setTimeout(() => toast(`Recuperados ${n} registros de la versión anterior`), 900);
     }
+    localStorage.setItem('iron-migrado-v1', '1');   // solo cuando ha salido bien
   } catch (e) { console.warn('migración', e); }
 }
 
@@ -1259,18 +1430,25 @@ function migrarIds() {
   for (const r of S.data.routines) {
     if (r.exerciseIds.some(id => mapa[id])) upsert('routines', { ...r, exerciseIds: r.exerciseIds.map(id => mapa[id] || id) });
   }
+  if (S.active) {
+    let tocado = false;
+    S.active.entries.forEach(en => { if (mapa[en.exerciseId]) { en.exerciseId = mapa[en.exerciseId]; tocado = true; } });
+    if (tocado) saveActive();
+  }
+  const favs = favoritos();
+  if (favs.some(id => mapa[id])) { profile().favs = favs.map(id => mapa[id] || id); saveProfile(); }
   (S.data.exercises || []).filter(e => mapa[e.id] || byId[e.id]).forEach(e => remove('exercises', e.id));
 }
 
 // ═══════════ Arranque ═══════════
-function bootDone() { const b = $('#boot'); b.classList.add('done'); setTimeout(() => b.remove(), 450); }
+function bootDone() { const b = $('#boot'); if (!b) return; b.classList.add('done'); setTimeout(() => b.remove(), 450); }
 
 async function boot() {
   injectDefs();
   if (firebaseConfig) {
     store = new FirebaseStore(firebaseConfig, OWNER_EMAIL, OWNER_EMAIL_SHA256);
     try {
-      if (!await store.init()) return showGate();
+      if (!await store.init()) return pantallaNube('login');
     } catch (e) {
       console.error(e);
       bootDone();
@@ -1283,6 +1461,13 @@ async function boot() {
   } else {
     store = new LocalStore();
     await store.init();
+    if (!cifradoDisponible()) {
+      // Sin https no se puede cifrar la contraseña: mejor entrar sin candado que dejarte fuera
+      setTimeout(() => toast('Sin conexión segura (https) no se puede usar contraseña: entras sin candado'), 800);
+    } else {
+      if (!hayCuenta()) return pantallaRegistroLocal();
+      if (!haySesion()) return pantallaLoginLocal();
+    }
   }
   await bootData();
 }
@@ -1293,30 +1478,67 @@ async function bootData() {
   $('#avatar').classList.remove('hidden');
   S.data = await store.loadAll();
   S.data.exercises ||= [];
-  rescatarVersionAntigua();
-  migrarIds();
   S.active = loadActive();
+  // Si algo va mal migrando datos antiguos, la app tiene que abrir igualmente
+  try { rescatarVersionAntigua(); migrarIds(); } catch (e) { console.error('Migración', e); }
   const quiere = new URLSearchParams(location.search).get('tab');
   if (quiere && views[quiere]) S.route = { v: quiere };
   if (S.active) { S.route = { v: 'entrenar' }; restoreRest(); }
-  store.onError = () => toast('No se pudo guardar en la nube');
+  store.onError = (e, q) => toast(store.mode === 'local' ? 'No se han podido guardar los datos' : `No se pudo ${q || 'guardar'} en la nube`);
+  renovarSesion();
   try { render(); } finally { bootDone(); }
 }
 
-function showGate() {
+function pantallaAcceso(html) {
   $('#tabbar').classList.add('hidden');
   $('#sync').classList.add('hidden');
   $('#avatar').classList.add('hidden');
-  $('#view').innerHTML = `
-    <div class="gate"><div class="gate-card">
-      <div class="brand-mark big"></div>
-      <h1>IRON</h1>
-      <p class="muted" style="margin-bottom:22px">Tu entrenamiento, tus pesos, tu progreso.<br>
-        <b style="color:var(--text)">App privada:</b> solo tu cuenta puede entrar.</p>
-      <button class="btn-google block" data-act="login">Entrar con Google</button>
-      <p class="tiny" style="margin-top:18px">${OWNER_EMAIL || OWNER_EMAIL_SHA256 ? 'Acceso restringido a una sola cuenta' : 'Acceso con cuenta de Google'}</p>
-    </div></div>`;
+  $('#view').innerHTML = `<div class="gate"><div class="gate-card">${html}</div></div>`;
   bootDone();
+  setTimeout(() => $('#view').querySelector('input')?.focus(), 120);
+}
+const cabecera = sub => `<div class="brand-mark big"></div><h1>IRON</h1>
+  <p class="muted" style="margin-bottom:20px">${sub}</p>`;
+const errorBox = e => (e ? `<p class="error-box">${esc(e)}</p>` : '');
+
+// ── Cuenta en este dispositivo (sin Firebase) ──
+function pantallaRegistroLocal(err, nombre = '') {
+  pantallaAcceso(`${cabecera('Crea tu cuenta para empezar')}
+    <label><span>Tu nombre</span><input id="rg-nombre" maxlength="40" value="${esc(nombre)}" placeholder="Miguel" autocomplete="name"></label>
+    <label><span>Contraseña</span><input id="rg-pass" type="password" autocomplete="new-password" placeholder="Mínimo 6 caracteres"></label>
+    <label><span>Repite la contraseña</span><input id="rg-pass2" type="password" autocomplete="new-password"></label>
+    ${errorBox(err)}
+    <button class="primary block big" data-act="reg-local">Crear cuenta y entrar</button>
+    <p class="tiny" style="margin-top:16px">La contraseña se guarda cifrada en este dispositivo y hace falta para abrir la app.
+      No cifra los entrenos: para eso y para sincronizar entre móvil y PC, configura Firebase.</p>`);
+}
+function pantallaLoginLocal(err) {
+  const n = nombreCuenta();
+  pantallaAcceso(`${cabecera(n ? `Hola, ${esc(n)}` : 'Introduce tu contraseña')}
+    <label><span>Contraseña</span><input id="lg-pass" type="password" autocomplete="current-password"></label>
+    ${errorBox(err)}
+    <button class="primary block big" data-act="login-local">Entrar</button>
+    <button class="ghost block" style="margin-top:10px" data-act="olvide">He olvidado la contraseña</button>`);
+}
+
+// ── Cuenta en la nube (con Firebase) ──
+function pantallaNube(modo = 'login', err) {
+  const reg = modo === 'registro';
+  pantallaAcceso(`${cabecera(reg ? 'Crea tu cuenta' : 'Entra en tu cuenta')}
+    <label><span>Correo</span><input id="fb-mail" type="email" autocomplete="email" placeholder="tu@correo.com"></label>
+    <label><span>Contraseña</span><input id="fb-pass" type="password" autocomplete="${reg ? 'new-password' : 'current-password'}"></label>
+    ${errorBox(err)}
+    <button class="primary block big" data-act="${reg ? 'nube-reg' : 'nube-login'}">${reg ? 'Crear cuenta' : 'Entrar'}</button>
+    <div class="sep"><span>o</span></div>
+    <button class="btn-google block" data-act="login">Continuar con Google</button>
+    <div class="row" style="justify-content:center;margin-top:16px">
+      <button class="ghost sm" data-act="auth-modo" data-m="${reg ? 'login' : 'registro'}">
+        ${reg ? 'Ya tengo cuenta' : 'Crear una cuenta nueva'}</button>
+      ${reg ? '' : `<button class="ghost sm" data-act="nube-reset">Olvidé la contraseña</button>`}
+    </div>
+    <p class="tiny" style="margin-top:16px">${OWNER_EMAIL || OWNER_EMAIL_SHA256
+      ? 'App privada: solo la cuenta del dueño puede entrar.' : 'Tus datos quedan guardados en tu cuenta.'}</p>`);
 }
 
 boot();
+

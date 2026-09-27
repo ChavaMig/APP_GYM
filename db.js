@@ -466,6 +466,25 @@ export const PLANTILLAS = [
     ] },
 ];
 
+// Rutinas de ejemplo para cada día de la semana (dia: 1 = lunes … 7 = domingo)
+export const SEMANA = [
+  { dia: 1, n: 'Lunes · Pecho y tríceps',
+    ex: ['press-banca', 'press-inclinado-mancuernas', 'aperturas-polea', 'fondos-triceps', 'extension-triceps-polea', 'press-frances'] },
+  { dia: 2, n: 'Martes · Espalda y bíceps',
+    ex: ['dominadas', 'remo-barra', 'jalon-agarre-estrecho', 'remo-mancuerna', 'curl-barra', 'curl-martillo'] },
+  { dia: 3, n: 'Miércoles · Pierna completa',
+    ex: ['sentadilla', 'prensa', 'peso-muerto-rumano', 'curl-femoral-tumbado', 'extension-cuadriceps', 'gemelos-pie'] },
+  { dia: 4, n: 'Jueves · Hombro y core',
+    ex: ['press-militar', 'elevaciones-laterales', 'pajaro', 'face-pull', 'crunch-polea', 'plancha'] },
+  { dia: 5, n: 'Viernes · Empuje y tirón',
+    ex: ['press-banca-mancuernas', 'remo-polea', 'press-hombro-mancuernas', 'jalon-pecho', 'curl-predicador', 'extension-triceps-cabeza'] },
+  { dia: 6, n: 'Sábado · Glúteo, abdomen y cardio',
+    ex: ['hip-thrust', 'zancadas', 'abductores', 'elevacion-piernas', 'russian-twist', 'cinta'] },
+  { dia: 7, n: 'Domingo · Descanso activo',
+    ex: ['comba', 'plancha', 'dead-bug', 'hiperextensiones', 'rotacion-externa'] },
+];
+export const DIAS = ['', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+
 // Mapas de apoyo
 export const byId = Object.fromEntries(EXERCISES.map(e => [e.id, e]));
 export const GRUPO_MUSCULO = { Pecho: 'pecho', Espalda: 'espalda', Pierna: 'cuadriceps', Hombro: 'hombro', Brazo: 'biceps', Core: 'core', Cardio: 'cuadriceps', Otro: 'core' };

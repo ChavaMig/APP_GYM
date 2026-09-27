@@ -475,3 +475,14 @@ button.big { min-height: 54px; font-size: 1.02rem; letter-spacing: .02em; }
 .lista-sel { max-height: 46vh; overflow-y: auto; }
 .lista-sel .ex-group { margin-bottom: 12px; }
 .lista-orden { margin: 6px 0 14px; padding-left: 20px; color: var(--muted); }
+
+/* ── Pantallas de acceso ─────────────────── */
+.gate-card label { text-align: left; }
+.brand-mark.big { width: 74px; height: 74px; border-radius: 22px; margin: 0 auto 18px; }
+.brand-mark.big::after { inset: 20px 14px; }
+.error-box { background: rgba(255, 77, 94, .12); border: 1px solid rgba(255, 77, 94, .35); color: #ffb3bb;
+  border-radius: 10px; padding: 9px 12px; font-size: .86rem; margin: 0 0 12px; text-align: left; }
+.sep { display: flex; align-items: center; gap: 10px; margin: 14px 0; color: var(--dim); font-size: .78rem; }
+.sep::before, .sep::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.fab-space { height: 78px; }
+body.resting .fab-space { height: 132px; }

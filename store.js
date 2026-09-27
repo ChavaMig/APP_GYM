@@ -26,7 +26,10 @@ export class LocalStore {
   }
   _save(data) {
     try { localStorage.setItem(LOCAL_KEY, JSON.stringify(data)); }
-    catch (e) { console.warn('No se pudo guardar', e); }
+    catch (e) {
+      console.error('No se pudo guardar', e);
+      this.onError?.(e, 'guardando');
+    }
   }
   put(data) { this._save(data); }
   del(data) { this._save(data); }
@@ -36,6 +39,7 @@ export class LocalStore {
 // ── Modo nube: Firebase (login Google + Firestore) ──
 // Huella SHA-256 de un texto, para comparar el correo sin guardarlo en claro
 async function huella(txt) {
+  if (!globalThis.crypto?.subtle) throw new Error('Abre la app por https: el navegador no permite comprobar la cuenta en una dirección no segura.');
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt));
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -94,6 +98,27 @@ export class FirebaseStore {
     err.code = 'app/not-owner';
     throw err;
   }
+
+  // ── Registro e inicio de sesión con correo y contraseña ──
+  async registrarCorreo(email, password) {
+    const cred = await this.A.createUserWithEmailAndPassword(this.auth, email.trim(), password);
+    if (!(await this._isOwner(cred.user))) {
+      // No es el dueño: deshacemos la cuenta recién creada en vez de dejarla ahí
+      try { await this.A.deleteUser(cred.user); } catch { await this.logout(); }
+      const err = new Error('Esta app es privada: solo puede entrar su dueño.');
+      err.code = 'app/not-owner';
+      throw err;
+    }
+    this.user = cred.user;
+    return true;
+  }
+  async entrarCorreo(email, password) {
+    const cred = await this.A.signInWithEmailAndPassword(this.auth, email.trim(), password);
+    await this._enforceOwner(cred.user);
+    this.user = cred.user;
+    return true;
+  }
+  recuperarCorreo(email) { return this.A.sendPasswordResetEmail(this.auth, email.trim()); }
 
   async login() {
     const provider = new this.A.GoogleAuthProvider();
