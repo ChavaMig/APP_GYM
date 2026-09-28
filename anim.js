@@ -12,7 +12,7 @@ const P = (eq, sup, a, b, rot = 0, dur = 2.6, off = [0, 0, 0, 0]) => ({ eq, sup,
 
 export const POSES = {
   // ── Empujes tumbado ──
-  'press-banco':      P('barra', 'banco', [0, -68, -85, -75, 80], [0, -92, -2, -75, 80], -90, 2.4),
+  'press-banco':      P('barra', 'banco', [0, -45, -110, -75, 80], [0, -88, -4, -75, 80], -90, 2.4),
   'press-inclinado':  P('barra', 'banco-inclinado', [0, -62, -80, -70, 75], [0, -88, -4, -70, 75], -55, 2.4),
   'aperturas':        P('mancuerna', 'banco', [0, -40, -18, -75, 80], [0, -92, -12, -75, 80], -90, 2.8),
   'pullover':         P('mancuerna', 'banco', [0, -160, -10, -75, 80], [0, -88, -6, -75, 80], -90, 2.8),
@@ -101,16 +101,32 @@ export const POSES = {
 const HIP = { x: 100, y: 104 };
 const TORSO = 44, HEAD = 10, UPPER = 27, FORE = 25, THIGH = 36, SHIN = 34;
 
-const seg = (len, w, cls = '') => `<rect class="lm ${cls}" x="${-w / 2}" y="0" width="${w}" height="${len}" rx="${w / 2}"/>`;
+// Un hueso con músculo: cápsula que empieza ancha y se estrecha
+const hueso = (L, a, b, cls = 'lm') => {
+  const ra = a / 2, rb = b / 2;
+  return `<path class="${cls}" d="M${-ra} 0
+    C${-ra} ${-ra * 1.1} ${ra} ${-ra * 1.1} ${ra} 0
+    C${ra * 1.06} ${L * 0.45} ${rb * 1.12} ${L * 0.62} ${rb} ${L}
+    C${rb} ${L + rb * 1.1} ${-rb} ${L + rb * 1.1} ${-rb} ${L}
+    C${-rb * 1.12} ${L * 0.62} ${-ra * 1.06} ${L * 0.45} ${-ra} 0 Z"/>`;
+};
+const seg = (len, w, cls = '') => hueso(len, w, w * 0.78, 'lm ' + cls);
+
+// El peso lo tira la gravedad: la barra y las mancuernas se quedan
+// siempre horizontales aunque el brazo gire. Sin esto, una barra de
+// press de banca aparecía inclinada y quedaba raro.
+const NIVELA = new Set(['barra', 'mancuerna', 'disco', 'kettlebell']);
 
 function equipo(tipo) {
   switch (tipo) {
     case 'barra':
-      return `<g class="eq"><rect x="-46" y="-3.5" width="92" height="7" rx="3.5"/>
-        <rect x="-44" y="-11" width="9" height="22" rx="3"/><rect x="35" y="-11" width="9" height="22" rx="3"/></g>`;
+      return `<g class="eq"><rect x="-48" y="-2.6" width="96" height="5.2" rx="2.6"/>
+        <rect x="-45" y="-13" width="8" height="26" rx="3"/><rect x="-36" y="-9" width="6" height="18" rx="2.5"/>
+        <rect x="37" y="-13" width="8" height="26" rx="3"/><rect x="30" y="-9" width="6" height="18" rx="2.5"/></g>`;
     case 'mancuerna':
-      return `<g class="eq"><rect x="-17" y="-2.6" width="34" height="5.2" rx="2.6"/>
-        <rect x="-17" y="-8" width="7" height="16" rx="2.5"/><rect x="10" y="-8" width="7" height="16" rx="2.5"/></g>`;
+      return `<g class="eq"><rect x="-18" y="-2.2" width="36" height="4.4" rx="2.2"/>
+        <rect x="-18" y="-9" width="7" height="18" rx="3"/><rect x="-10" y="-6.5" width="4.5" height="13" rx="2"/>
+        <rect x="11" y="-9" width="7" height="18" rx="3"/><rect x="5.5" y="-6.5" width="4.5" height="13" rx="2"/></g>`;
     case 'kettlebell':
       return `<g class="eq"><circle cx="0" cy="8" r="9"/><path d="M-6 2a6 6 0 0 1 12 0" fill="none" stroke="currentColor" stroke-width="3"/></g>`;
     case 'disco':
@@ -188,10 +204,23 @@ export function exerciseSVG(key, opt = {}) {
       <g transform="translate(${HIP.x},${HIP.y})">${seg(THIGH, 16)}</g>
       ${joint('shin', HIP.x, HIP.y + THIGH, r0, r1, `
         <g transform="translate(${HIP.x},${HIP.y + THIGH})">${seg(SHIN, 13)}</g>
-        <g transform="translate(${HIP.x},${HIP.y + THIGH + SHIN})"><rect class="lm" x="-5" y="-4" width="20" height="8" rx="4"/></g>`)}`);
+        <g transform="translate(${HIP.x},${HIP.y + THIGH + SHIN})">
+          <path class="lm" d="M-5 -5 C-5 -1 -4 3 2 4 L15 4.5 C18 4.5 18 -1 15 -1.5 L5 -3 C3 -3.4 2 -4.6 2 -5 Z"/></g>`)}`);
 
-  // El tronco se dibuja desde la cadera hacia arriba, por eso la altura negativa
-  const torsoFix = `<g transform="translate(${HIP.x},${HIP.y})"><rect class="lm" x="-13" y="${-TORSO}" width="26" height="${TORSO}" rx="12"/></g>`;
+  // Silueta del tronco: hombros anchos, cintura marcada y cadera
+  const torsoFix = `<g transform="translate(${HIP.x},${HIP.y})">
+    <path class="lm" d="M-14 2
+      C-17 -8 -15 -15 -13.5 -22
+      C-12.5 -29 -16 -34 -15.5 -${TORSO - 6}
+      C-15.2 -${TORSO + 1} -9 -${TORSO + 3} 0 -${TORSO + 3}
+      C9 -${TORSO + 3} 15.2 -${TORSO + 1} 15.5 -${TORSO - 6}
+      C16 -34 12.5 -29 13.5 -22
+      C15 -15 17 -8 14 2
+      C7 5 -7 5 -14 2 Z"/>
+    <path class="lm2" d="M-11 -${TORSO - 4} C-4 -${TORSO - 9} 4 -${TORSO - 9} 11 -${TORSO - 4}
+      C10 -${TORSO - 14} -10 -${TORSO - 14} -11 -${TORSO - 4} Z"/>
+    <rect class="lm2" x="-5" y="-${TORSO + 8}" width="10" height="9" rx="4"/>
+  </g>`;
 
   return `<svg class="exfig ${anim ? 'anim' : ''}" id="${id}" viewBox="0 0 200 168" role="img"
       aria-label="Ilustración del ejercicio" style="--dur:${p.dur}s">
@@ -201,16 +230,26 @@ export function exerciseSVG(key, opt = {}) {
         --t1:translate(${p.off[2]}px,${p.off[3]}px) rotate(${p.rot}deg) scale(.88)">
       ${joint('torso', HIP.x, HIP.y, t0, t1, `
         ${torsoFix}
-        <g transform="translate(${HIP.x},${HIP.y})"><circle class="lm" cx="0" cy="${-TORSO - HEAD + 2}" r="${HEAD}"/></g>
-        ${p.eq === 'barra-espalda' ? `<g transform="translate(${HIP.x},${HIP.y - TORSO + 4})" class="eqs">
-          <rect x="-46" y="-3.5" width="92" height="7" rx="3.5"/>
-          <rect x="-44" y="-11" width="9" height="22" rx="3"/><rect x="35" y="-11" width="9" height="22" rx="3"/></g>` : ''}
+        <g transform="translate(${HIP.x},${HIP.y})">
+          <ellipse class="lm" cx="1" cy="${-TORSO - HEAD - 3}" rx="${HEAD - 0.5}" ry="${HEAD + 1.5}"/>
+          <path class="lm2" d="M${HEAD - 3} ${-TORSO - HEAD - 7} a4 4 0 0 1 0 8 z"/></g>
+        ${p.eq === 'barra-espalda'
+          ? joint('nivel', HIP.x, HIP.y - TORSO + 4, -(p.rot + t0), -(p.rot + t1),
+              `<g transform="translate(${HIP.x},${HIP.y - TORSO + 4})" class="eqs">
+                <rect x="-46" y="-3.5" width="92" height="7" rx="3.5"/>
+                <rect x="-44" y="-11" width="9" height="22" rx="3"/><rect x="35" y="-11" width="9" height="22" rx="3"/></g>`)
+          : ''}
         ${joint('arm', HIP.x, HIP.y - TORSO, a0, a1, `
           <g transform="translate(${HIP.x},${HIP.y - TORSO})">${seg(UPPER, 13)}</g>
           ${joint('fore', HIP.x, HIP.y - TORSO + UPPER, e0, e1, `
             <g transform="translate(${HIP.x},${HIP.y - TORSO + UPPER})">${seg(FORE, 11)}</g>
             <g transform="translate(${HIP.x},${manoY})" class="hand">
-              <circle class="lm" cx="0" cy="0" r="6"/>${equipo(p.eq)}</g>`)}`)}`)}
+              <ellipse class="lm" cx="0" cy="1" rx="5.4" ry="6.6"/></g>
+            ${NIVELA.has(p.eq)
+              ? joint('nivel', HIP.x, manoY,
+                  -(p.rot + t0 + a0 + e0), -(p.rot + t1 + a1 + e1),
+                  `<g transform="translate(${HIP.x},${manoY})">${equipo(p.eq)}</g>`)
+              : `<g transform="translate(${HIP.x},${manoY})">${equipo(p.eq)}</g>`}`)}`)}`)}
       ${piernas}
     </g>
   </svg>`;

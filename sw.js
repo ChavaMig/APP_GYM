@@ -1,9 +1,9 @@
 // Service worker: la app abre sin conexión.
 // Cada vez que cambies archivos, sube este numero (v6, v7...).
-const VERSION = 'iron-v8';
+const VERSION = 'iron-v10';
 const APP_FILES = [
   './', './index.html', './style.css', './app.js', './ui.js', './store.js', './firebase-config.js',
-  './db.js', './anim.js', './auth.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png',
+  './db.js', './anim.js', './auth.js', './dieta.js', './fotos.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png',
 ];
 const RUNTIME_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com', 'www.gstatic.com'];
 const CACHE_EXTERNO = 'iron-externo';   // tipografías y SDK: se conservan entre versiones

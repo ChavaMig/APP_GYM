@@ -1,8 +1,10 @@
 import { firebaseConfig, OWNER_EMAIL, OWNER_EMAIL_SHA256 } from './firebase-config.js';
 import { LocalStore, FirebaseStore } from './store.js';
-import { EXERCISES, PLANTILLAS, SEMANA, DIAS, GROUPS, GROUP_COLOR, EQUIP, MUSCLES, VOLUMEN_OBJETIVO, byId, GRUPO_MUSCULO, NOMBRES_ANTIGUOS } from './db.js';
+import { EXERCISES, PLANTILLAS, SEMANA, DIAS, GROUPS, EQUIP, MUSCLES, VOLUMEN_OBJETIVO, byId, GRUPO_MUSCULO, NOMBRES_ANTIGUOS } from './db.js';
 import { hayCuenta, haySesion, nombreCuenta, registrar, entrar, salir, cambiarPassword, quitarCuenta, renovarSesion, cifradoDisponible } from './auth.js';
 import { exerciseSVG } from './anim.js';
+import { pintarFotos } from './fotos.js';
+import { OBJETIVOS, ACTIVIDADES, PLANES, calcularNutricion, AVISO_DIETA } from './dieta.js';
 import { icon, injectDefs, lineChart, weekBars, goalRing, bodyMap, calendarHeat, plateView, celebrate } from './ui.js';
 
 // ═══════════ Utilidades ═══════════
@@ -39,7 +41,7 @@ const S = {
   active: null,
   progEx: null, progMetric: 'max',
   filtro: { q: '', grupo: '', equipo: '', fav: false },
-  pick: [], pickTarget: null,
+  pick: [], rt: null,
   rest: { end: 0, iv: null, total: 90 },
   celebrated: new Set(),
 };
@@ -172,11 +174,12 @@ const TABS = [
   ['inicio', 'Inicio', 'inicio'],
   ['entrenar', 'Entrenar', 'pesa'],
   ['ejercicios', 'Ejercicios', 'libro'],
+  ['dieta', 'Dieta', 'dieta'],
   ['progreso', 'Progreso', 'grafica'],
   ['perfil', 'Perfil', 'usuario'],
 ];
 function go(v, id) { S.route = { v, id }; render(); scrollTo({ top: 0 }); }
-const VOLVER = { ejercicio: 'ejercicios', historial: 'inicio', calendario: 'progreso', plantillas: 'entrenar' };
+const VOLVER = { ejercicio: 'ejercicios', historial: 'inicio', calendario: 'progreso', plantillas: 'entrenar', plan: 'dieta' };
 const aDondeVuelvo = () => (S.route.v === 'ejercicio' && S.active ? 'entrenar' : VOLVER[S.route.v] || 'inicio');
 
 function renderTabs() {
@@ -197,6 +200,8 @@ const views = {
   historial: viewHistorial,
   calendario: viewCalendario,
   plantillas: viewPlantillas,
+  dieta: viewDieta,
+  plan: viewPlan,
 };
 
 // ── Portada ──
@@ -208,7 +213,6 @@ function viewInicio() {
   const racha = weekStreak();
   const wk = thisWeek();
   const vol = wk.reduce((a, w) => a + wVolume(w), 0);
-  const sets = wk.reduce((a, w) => a + wSets(w), 0);
   const prs = allPRs();
   const last = [...S.data.workouts].sort(byDate).at(-1);
   const labels = [], values = [];
@@ -217,55 +221,57 @@ function viewInicio() {
     labels.push(new Date(d + 'T12:00').toLocaleDateString('es-ES', { weekday: 'narrow' }).toUpperCase());
     values.push(S.data.workouts.filter(w => w.date === d).reduce((a, w) => a + wVolume(w), 0));
   }
-  const load = muscleLoad(7);
   const next = sugerirRutina();
+  const nut = calcularNutricion({ ...p, pesoKg: latestWeight()?.kg });
 
   return `<div class="stagger">
-    <section class="portada">
-      <div class="portada-bg"><i></i><i></i><i></i></div>
-      <div class="portada-in">
-        <span class="hero-date">${cap(new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }))}</span>
-        <h1 class="hero-title">${saludo}${nombre ? `,<br>${nombre}` : ''}</h1>
-        ${!nombre ? '<p class="muted" style="margin:6px 0 0">Listo para entrenar</p>' : ''}
+    <section class="foto-hero" data-foto="portada">
+      <div>
+        <div class="saludo">${cap(new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }))}</div>
+        <h1>${saludo}${nombre ? `, ${nombre}` : ''}</h1>
         <div class="row" style="margin-top:14px">
-          ${racha ? `<span class="streak">${icon('fuego', 15)} ${racha} semana${racha === 1 ? '' : 's'} seguida${racha === 1 ? '' : 's'}</span>` : ''}
-          <span class="streak alt">${icon('pesa', 15)} ${S.data.workouts.length} entreno${S.data.workouts.length === 1 ? '' : 's'}</span>
+          <button class="primary" data-act="go" data-v="entrenar">
+            ${icon('play', 18)} ${S.active ? 'Continuar entreno' : 'Entrenar'}</button>
+          ${racha ? `<span class="chip">${racha} ${racha === 1 ? 'semana' : 'semanas'} seguidas</span>` : ''}
         </div>
-        ${S.active
-          ? `<button class="primary block big" data-act="go" data-v="entrenar" style="margin-top:18px">
-              ${icon('play', 20)} Continuar entreno</button>`
-          : `<button class="primary block big" data-act="go" data-v="entrenar" style="margin-top:18px">
-              ${icon('play', 20)} Empezar a entrenar</button>`}
       </div>
     </section>
 
     <div class="card">${goalRing(wk.length, weeklyGoal())}</div>
 
     <div class="tiles">
-      <div class="tile"><span class="tiny">Volumen</span><b class="count">${kfmt(vol)}</b><u>kg esta semana</u></div>
-      <div class="tile"><span class="tiny">Series</span><b class="count">${sets}</b><u>esta semana</u></div>
-      <div class="tile"><span class="tiny">Récords</span><b class="count">${prs.length}</b><u>ejercicios</u></div>
-      <div class="tile"><span class="tiny">Ejercicios</span><b class="count">${allEx().length}</b><u>en el catálogo</u></div>
+      <div class="tile"><span class="tiny">Volumen</span><b>${kfmt(vol)}</b><u>kg esta semana</u></div>
+      <div class="tile"><span class="tiny">Entrenos</span><b>${S.data.workouts.length}</b><u>en total</u></div>
+      <div class="tile"><span class="tiny">Récords</span><b>${prs.length}</b><u>ejercicios</u></div>
     </div>
+
+    ${next ? `<div class="section-head"><h2>Hoy</h2><span class="tiny">${esc(next.motivo)}</span></div>
+      ${rutinaCard(next.rutina, true)}` : ''}
+
+    ${nut ? `<div class="card fila" data-act="go" data-v="dieta" role="button" style="cursor:pointer">
+        ${icon('dieta', 22)}
+        <div class="fila-txt"><b>Tu dieta</b><span>${nut.kcal} kcal · ${nut.prot} g de proteína al día</span></div>
+        ${icon('derecha', 18, 'chev')}
+      </div>`
+      : `<div class="card fila" data-act="go" data-v="perfil" role="button" style="cursor:pointer">
+        ${icon('dieta', 22)}
+        <div class="fila-txt"><b>Calcula tu dieta</b><span>Completa tu perfil y te propongo dos planes</span></div>
+        ${icon('derecha', 18, 'chev')}
+      </div>`}
 
     <div class="section-head"><h2>Tu semana</h2><span class="tiny">kg por día</span></div>
     <div class="card">${weekBars(values, labels)}</div>
 
-    <div class="section-head"><h2>Músculos trabajados</h2><span class="tiny">últimos 7 días</span></div>
-    <div class="card">${bodyMap(load)}</div>
+    <div class="section-head"><h2>Músculos</h2><span class="tiny">últimos 7 días</span></div>
+    <div class="card">${bodyMap(muscleLoad(7))}</div>
 
-    ${next ? `<div class="section-head"><h2>Te toca</h2><span class="tiny">${esc(next.motivo)}</span></div>
-      ${rutinaCard(next.rutina, true)}` : ''}
-
-    ${prs.length ? `<div class="section-head"><h2>Últimos récords</h2>
+    ${prs.length ? `<div class="section-head"><h2>Récords</h2>
         <button class="sm ghost" data-act="go" data-v="progreso">Ver todos</button></div>
       <div class="card">${prs.slice(0, 3).map((p, i) => prItem(p, i)).join('')}</div>` : ''}
 
     ${last ? `<div class="section-head"><h2>Último entreno</h2>
         <button class="sm ghost" data-act="go" data-v="historial">Historial</button></div>
-      ${workoutCard(last, true)}` : `<div class="card center">
-        <p class="muted">Aún no has guardado ningún entreno.</p>
-        <button class="primary" data-act="go" data-v="entrenar">${icon('play', 18)} Empezar el primero</button></div>`}
+      ${workoutCard(last, true)}` : ''}
   </div>`;
 }
 
@@ -292,67 +298,55 @@ function sugerirRutina() {
 }
 
 function rutinaCard(r, destacada = false) {
-  const grupos = [...new Set(r.exerciseIds.map(exGroup))];
+  const grupos = [...new Set(r.exerciseIds.map(exGroup))].slice(0, 3);
   return `<div class="routine ${destacada ? 'destacada' : ''}">
     <div class="routine-top">
-      <div class="grow"><h3>${esc(r.name)}</h3>
-        <span class="muted small">${r.exerciseIds.length} ejercicios${r.dia ? ` · ${DIAS[r.dia]}` : ''}</span></div>
-      <div class="mini-figs">${r.exerciseIds.slice(0, 3).map(id =>
+      <div class="grow">
+        ${r.dia ? `<span class="dia-badge">${DIAS[r.dia]}</span>` : ''}
+        <h3 style="margin-top:${r.dia ? '8px' : '0'}">${esc(r.name)}</h3>
+        <span class="muted small">${r.exerciseIds.length} ejercicios · ${grupos.join(', ')}</span>
+      </div>
+      <div class="mini-figs">${r.exerciseIds.slice(0, 2).map(id =>
         `<div class="mini-fig">${exerciseSVG(exById(id)?.pose || 'curl', { anim: false })}</div>`).join('')}</div>
     </div>
-    <div class="chips" style="margin:10px 0 12px">
-      ${grupos.map(g => `<span class="tag m" style="--mc:${GROUP_COLOR[g] || '#8d96a7'}">${esc(g)}</span>`).join('')}</div>
-    <div class="row nowrap">
+    <div class="row nowrap" style="margin-top:14px">
       <button class="primary grow" data-act="start" data-id="${r.id}">${icon('play', 18)} Empezar</button>
-      <button class="icon-btn" data-act="edit-routine" data-id="${r.id}" aria-label="Editar rutina">${icon('editar', 18)}</button>
-      <button class="icon-btn danger" data-act="del-routine" data-id="${r.id}" aria-label="Borrar rutina">${icon('papelera', 18)}</button>
+      <button class="icon-btn ghost" data-act="edit-routine" data-id="${r.id}" aria-label="Editar">${icon('editar', 18)}</button>
+      <button class="icon-btn ghost" data-act="del-routine" data-id="${r.id}" aria-label="Borrar">${icon('papelera', 18)}</button>
     </div></div>`;
 }
 
 // ── Entrenar ──
 function viewEntrenar() {
   return `<div class="stagger">
-    <div class="section-head"><h2>Mis rutinas</h2>
-      <div class="row nowrap">
-        <button class="sm" data-act="go" data-v="plantillas">${icon('estrella', 15)} Plantillas</button>
-        <button class="sm primary" data-act="edit-routine">${icon('mas', 15)} Nueva</button>
-      </div></div>
-    ${S.data.routines.length
-      ? S.data.routines.map(r => rutinaCard(r)).join('')
-      : `<div class="card center">
-          <p class="muted">Todavía no tienes rutinas guardadas.</p>
-          <div class="row" style="justify-content:center">
-            <button class="primary" data-act="go" data-v="plantillas">${icon('estrella', 18)} Usar una plantilla</button>
-            <button data-act="edit-routine">${icon('mas', 18)} Crear la mía</button>
-          </div></div>`}
-    <button class="block" data-act="start" style="margin-top:6px">${icon('rayo', 18)} Entreno libre</button>
-    ${S.data.routines.some(r => r.dia) ? '' : `
-      <div class="card" style="margin-top:16px">
-        <div class="row nowrap">${icon('calendario', 20)}<div class="grow">
-          <b>Semana completa de ejemplo</b>
-          <div class="muted small">Siete rutinas listas, una para cada día: pecho, espalda, pierna, hombro, empuje y tirón, glúteo y cardio, y descanso activo.</div>
-        </div></div>
-        <button class="primary block" style="margin-top:10px" data-act="cargar-semana">Añadir las 7 rutinas</button>
-      </div>`}
+    <div class="foto-banda" data-foto="entrenar"><div>
+      <h2>Entrenar</h2><p>${S.data.routines.length ? `${S.data.routines.length} rutinas guardadas` : 'Crea tu primera rutina'}</p>
+    </div></div>
+    <div class="row">
+      <button class="primary grow" data-act="edit-routine">${icon('mas', 18)} Nueva rutina</button>
+      <button class="grow" data-act="go" data-v="plantillas">${icon('estrella', 18)} Plantillas</button>
+    </div>
+    ${S.data.routines.length ? `<div style="margin-top:16px">${S.data.routines.map(r => rutinaCard(r)).join('')}</div>` : ''}
+    ${!S.data.routines.some(r => r.dia) ? `
+      <div class="card fila" data-act="cargar-semana" role="button" style="cursor:pointer;margin-top:4px">
+        ${icon('calendario', 22)}
+        <div class="fila-txt"><b>Semana completa</b><span>Siete rutinas, una para cada día</span></div>
+        ${icon('mas', 18, 'chev')}
+      </div>` : ''}
+    <button class="block ghost" style="margin-top:10px" data-act="start">${icon('rayo', 18)} Entreno libre</button>
   </div>`;
 }
 
 function viewPlantillas() {
   return `<div class="stagger">
-    <div class="section-head"><h2>Plantillas de rutina</h2></div>
-    <p class="muted small">Rutinas ya montadas. Al añadirlas se copian a las tuyas y puedes cambiarlas a tu gusto.</p>
-    <div class="card">
-      <div class="row nowrap">${icon('calendario', 20)}<div class="grow"><b>Semana completa (7 días)</b>
-        <div class="muted small">Una rutina para cada día, ya asignada a su día de la semana.</div></div></div>
-      <button class="primary block" style="margin-top:10px" data-act="cargar-semana">Añadir las 7 rutinas</button>
-    </div>
+    <div class="section-head"><h2>Plantillas</h2><span class="tiny">se copian a tus rutinas</span></div>
     ${PLANTILLAS.map(p => `
       <div class="card">
-        <div class="row between"><h3>${esc(p.n)}</h3>
-          <button class="sm primary" data-act="add-plantilla" data-id="${p.id}">${icon('mas', 15)} Añadir</button></div>
-        <p class="muted small" style="margin:6px 0 10px">${esc(p.desc)}</p>
-        ${p.dias.map(d => `<div class="ex-line"><span><b>${esc(d.n)}</b></span>
-          <span class="muted small">${d.ex.map(id => esc(exName(id))).join(' · ')}</span></div>`).join('')}
+        <div class="row between">
+          <div class="grow"><h3>${esc(p.n)}</h3>
+            <span class="muted small">${p.dias.length} ${p.dias.length === 1 ? 'día' : 'días'} · ${esc(p.desc)}</span></div>
+          <button class="sm primary" data-act="add-plantilla" data-id="${p.id}">Añadir</button>
+        </div>
       </div>`).join('')}
   </div>`;
 }
@@ -408,7 +402,7 @@ function exCard(en, ei) {
           ${exerciseSVG(ex?.pose || 'curl', { anim: false })}</div>
         <div class="grow">
           <h3>${esc(ex?.n || 'Ejercicio')}</h3>
-          <span class="tag m" style="--mc:${GROUP_COLOR[g] || '#8d96a7'}">${esc(g)}</span>
+          <span class="tag">${esc(g)}</span>
         </div>
         <button class="icon-btn ghost" data-act="ex-menu" data-ei="${ei}" aria-label="Opciones">${icon('mas-opciones', 18)}</button>
       </div>
@@ -468,33 +462,36 @@ function viewEjercicios() {
     (!f.grupo || e.g === f.grupo) &&
     (!f.equipo || e.eq === f.equipo) &&
     (!f.fav || favoritos().includes(e.id)));
-  return `
-    <div class="section-head"><h2>Ejercicios</h2><span class="tiny">${lista.length} de ${allEx().length}</span></div>
+  return `<div class="stagger">
+    <div class="foto-banda" data-foto="ejercicios"><div>
+      <h2>Ejercicios</h2><p>${lista.length} de ${allEx().length}</p>
+    </div></div>
     <div class="buscador">
       ${icon('buscar', 18)}
-      <input id="q" class="grow" placeholder="Buscar ejercicio o músculo…" value="${esc(f.q)}" autocomplete="off">
+      <input id="q" class="grow" placeholder="Buscar ejercicio o músculo" value="${esc(f.q)}" autocomplete="off">
       ${f.q ? `<button class="icon-btn ghost" data-act="limpiar-q" aria-label="Limpiar">${icon('cerrar', 16)}</button>` : ''}
     </div>
-    <div class="chips scroll-x">
-      <button class="chip ${f.fav ? 'on' : ''}" data-act="filtro" data-k="fav">${icon('estrella', 14)} Favoritos</button>
+    <div class="chips scroll-x" style="margin-top:12px">
+      <button class="chip ${f.fav ? 'on' : ''}" data-act="filtro" data-k="fav">Favoritos</button>
       ${GROUPS.map(g => `<button class="chip ${f.grupo === g ? 'on' : ''}" data-act="filtro" data-k="grupo" data-v="${g}">${g}</button>`).join('')}
     </div>
-    <div class="chips scroll-x" style="margin-top:6px">
+    <div class="chips scroll-x" style="margin:8px 0 14px">
       ${Object.entries(EQUIP).map(([k, v]) => `<button class="chip sm ${f.equipo === k ? 'on' : ''}" data-act="filtro" data-k="equipo" data-v="${k}">${v}</button>`).join('')}
     </div>
-    <div class="ex-grid">
+    <div class="ex-lista">
       ${lista.map(e => `
-        <button class="ex-tile" data-act="go" data-v="ejercicio" data-id="${e.id}">
-          <div class="ex-demo sm">${exerciseSVG(e.pose, { anim: false })}</div>
-          <div class="ex-tile-txt">
+        <button class="ex-fila" data-act="go" data-v="ejercicio" data-id="${e.id}">
+          <div class="mini-fig">${exerciseSVG(e.pose, { anim: false })}</div>
+          <div class="ex-fila-txt">
             <b>${esc(e.n)}</b>
-            <span class="tag m" style="--mc:${GROUP_COLOR[e.g] || '#8d96a7'}">${esc(e.g)}</span>
-            <span class="tiny">${EQUIP[e.eq] || ''}</span>
+            <span>${esc(e.g)} · ${EQUIP[e.eq] || ''}</span>
           </div>
-          ${favoritos().includes(e.id) ? `<span class="fav-mark">${icon('estrella', 14)}</span>` : ''}
-        </button>`).join('') || '<p class="muted">No hay ejercicios con esos filtros.</p>'}
+          ${favoritos().includes(e.id) ? icon('estrella', 16, 'fav-on') : ''}
+          ${icon('derecha', 18, 'chev')}
+        </button>`).join('') || '<p class="muted" style="padding:18px">No hay ejercicios con esos filtros.</p>'}
     </div>
-    <button class="block" style="margin-top:14px" data-act="new-exercise">${icon('mas', 18)} Crear un ejercicio mío</button>`;
+    <button class="block ghost" style="margin-top:14px" data-act="new-exercise">${icon('mas', 18)} Crear un ejercicio</button>
+  </div>`;
 }
 
 // ── Ficha de un ejercicio ──
@@ -508,58 +505,47 @@ function viewFichaEjercicio() {
   const sug = sugerencia(e.id);
   const dif = ['', 'Fácil', 'Media', 'Difícil'][e.dif] || '';
   return `<div class="stagger">
-    <div class="ficha-hero">
-      <div class="ex-demo grande">${exerciseSVG(e.pose)}</div>
-    </div>
-    <div class="row between" style="margin-top:14px">
+    <div class="ficha-hero"><div class="ex-demo grande">${exerciseSVG(e.pose)}</div></div>
+    <div class="row between" style="margin-top:16px">
       <h2 class="grow">${esc(e.n)}</h2>
-      <button class="icon-btn ${fav ? 'on' : ''}" data-act="fav" data-id="${e.id}" aria-label="Favorito">${icon('estrella', 18)}</button>
+      <button class="icon-btn ghost ${fav ? 'on' : ''}" data-act="fav" data-id="${e.id}" aria-label="Favorito">${icon('estrella', 18)}</button>
     </div>
-    <div class="chips" style="margin:8px 0 4px">
-      <span class="tag m" style="--mc:${GROUP_COLOR[e.g] || '#8d96a7'}">${esc(e.g)}</span>
-      <span class="tag">${EQUIP[e.eq] || 'Otro'}</span>
+    <div class="chips" style="margin:10px 0 16px">
+      <span class="tag">${esc(e.g)}</span><span class="tag">${EQUIP[e.eq] || 'Otro'}</span>
       ${dif ? `<span class="tag">${dif}</span>` : ''}
-    </div>
-    <div class="chips" style="margin-bottom:12px">
       ${e.m.map(m => `<span class="chip sm">${esc(MUSCLES[m] || m)}</span>`).join('')}
     </div>
 
     <div class="row">
-      <button class="primary grow" data-act="add-to-workout" data-id="${e.id}">${icon('play', 18)} ${S.active ? 'Añadir al entreno' : 'Entrenar esto ahora'}</button>
-      <button data-act="add-to-routine" data-id="${e.id}">${icon('lista', 18)} A una rutina</button>
+      <button class="primary grow" data-act="add-to-workout" data-id="${e.id}">${icon('play', 18)} ${S.active ? 'Añadir al entreno' : 'Entrenar esto'}</button>
+      <button class="ghost" data-act="add-to-routine" data-id="${e.id}">${icon('lista', 18)}</button>
     </div>
 
-    ${sug ? `<div class="card accent-edge" style="margin-top:14px">
+    ${sug ? `<div class="card accent-edge" style="margin-top:16px">
       <span class="tiny">Objetivo de hoy</span>
-      <h3>${sug.kg ? fmt(sug.kg) + ' kg × ' + sug.reps : sug.reps + ' repeticiones'}</h3>
-      <p class="muted small" style="margin:4px 0 0">${esc(sug.motivo)}</p>
-      ${sug.kg ? `<button class="sm" style="margin-top:8px" data-act="discos" data-kg="${sug.kg}">${icon('peso', 15)} Ver discos</button>` : ''}
+      <h3 style="margin:2px 0 2px">${sug.kg ? fmt(sug.kg) + ' kg × ' + sug.reps : sug.reps + ' repeticiones'}</h3>
+      <span class="muted small">${esc(sug.motivo)}</span>
+      ${sug.kg ? `<button class="sm ghost" style="margin-top:10px" data-act="discos" data-kg="${sug.kg}">Ver discos</button>` : ''}
     </div>` : ''}
 
     ${est >= 2 ? `<div class="card aviso">${icon('alerta', 20)}
-      <div><b>Llevas ${est} sesiones sin mejorar</b>
-      <div class="muted small">Prueba a bajar el peso un 10% y subir repeticiones, o cambia a un ejercicio parecido durante unas semanas.</div></div></div>` : ''}
+      <div><b>${est} sesiones sin mejorar</b>
+      <div class="muted small">Baja el peso un 10% y sube repeticiones, o cambia a un ejercicio parecido unas semanas.</div></div></div>` : ''}
 
-    <div class="section-head"><h3>Cómo se hace</h3></div>
-    <div class="card"><ol class="pasos">${e.pasos.map(p => `<li>${esc(p)}</li>`).join('')}</ol></div>
+    <div class="section-head"><h3>Técnica</h3></div>
+    <div class="card"><ol class="pasos">${e.pasos.map(x => `<li>${esc(x)}</li>`).join('')}</ol>
+      ${e.tips?.length ? `<div style="margin-top:14px">${e.tips.map(t => `<div class="tip">${icon('idea', 16)}<span>${esc(t)}</span></div>`).join('')}</div>` : ''}
+      ${e.fallos?.length ? e.fallos.map(t => `<div class="tip malo">${icon('cerrar', 16)}<span>${esc(t)}</span></div>`).join('') : ''}
+    </div>
 
-    ${e.tips?.length ? `<div class="section-head"><h3>Consejos</h3></div>
-      <div class="card">${e.tips.map(t => `<div class="tip">${icon('idea', 16)}<span>${esc(t)}</span></div>`).join('')}</div>` : ''}
-
-    ${e.fallos?.length ? `<div class="section-head"><h3>Errores típicos</h3></div>
-      <div class="card">${e.fallos.map(t => `<div class="tip malo">${icon('cerrar', 16)}<span>${esc(t)}</span></div>`).join('')}</div>` : ''}
-
-    <div class="section-head"><h3>Tu historial</h3></div>
-    ${h.length ? `<div class="card">
-        <div class="tiles" style="margin-bottom:12px">
+    ${h.length ? `<div class="section-head"><h3>Tu progreso</h3></div>
+      <div class="card">
+        <div class="tiles" style="margin-bottom:14px">
           <div class="tile"><span class="tiny">Récord</span><b>${best.kg > 0 ? fmt(best.kg) : best.reps}</b><u>${best.kg > 0 ? 'kg × ' + best.reps : 'reps'}</u></div>
           <div class="tile"><span class="tiny">Sesiones</span><b>${h.length}</b><u>registradas</u></div>
-          <div class="tile"><span class="tiny">Última vez</span><b style="font-size:1.1rem">${fshort(h.at(-1).date)}</b><u>${setsText(h.at(-1).sets)}</u></div>
         </div>
         ${lineChart(h.map(r => ({ d: r.date, y: r.max })), 'kg')}
-        ${h.slice(-6).reverse().map(r => `<div class="ex-line"><span>${fshort(r.date)}</span><span class="muted num">${setsText(r.sets)}</span></div>`).join('')}
-      </div>`
-      : `<div class="card center"><p class="muted">Aún no has hecho este ejercicio. Cuando lo entrenes, aquí verás tu progreso.</p></div>`}
+      </div>` : ''}
   </div>`;
 }
 
@@ -634,6 +620,8 @@ function viewProgreso() {
   const gruposMusc = Object.entries(semana).sort((a, c) => c[1] - a[1]);
 
   return `<div class="stagger">
+    <div class="foto-banda" data-foto="progreso"><div>
+      <h2>Progreso</h2><p>${S.data.workouts.length} entrenos registrados</p></div></div>
     <div class="section-head"><h2>Por ejercicio</h2></div>${bloque}
 
     <div class="section-head"><h2>Volumen semanal</h2><span class="tiny">series por músculo</span></div>
@@ -698,73 +686,177 @@ function viewPerfil() {
   const bw = [...S.data.bodyweights].sort(byDate).reverse();
   const b = bmi();
   const nube = store.mode === 'firebase';
+  const peso = latestWeight();
   return `<div class="stagger">
-    <div class="section-head"><h2>Mi perfil</h2></div>
+    <div class="foto-banda" data-foto="perfil"><div>
+      <h2>${esc(p.name || 'Mi perfil')}</h2>
+      <p>${peso ? `${fmt(peso.kg)} kg` : 'Sin peso registrado'}${b ? ` · IMC ${fmt(b.v)}` : ''}</p>
+    </div></div>
+
     <div class="card">
       <div class="field-row">
         <label><span>Nombre</span><input data-prof="name" value="${esc(p.name)}" placeholder="Tu nombre"></label>
+        <label><span>Edad</span><input data-prof="edad" inputmode="numeric" value="${esc(p.edad)}" placeholder="28"></label>
         <label><span>Altura (cm)</span><input data-prof="heightCm" inputmode="decimal" value="${esc(p.heightCm)}" placeholder="178"></label>
-        <label><span>Objetivo semanal</span><input data-prof="weeklyGoal" inputmode="numeric" value="${weeklyGoal()}"></label>
-        <label><span>Descanso (seg)</span><input data-prof="restSec" inputmode="numeric" value="${restSec()}"></label>
       </div>
-      ${b ? `<div class="tile"><span class="tiny">Índice de masa corporal</span>
-        <b style="color:${b.cat[1]}">${fmt(b.v)} · ${b.cat[0]}</b>
-        <u>El IMC no distingue músculo de grasa: tómalo solo como referencia.</u></div>` : ''}
+      <span class="tiny">Sexo</span>
+      <div class="chips" style="margin:8px 0 16px">
+        ${[['h', 'Hombre'], ['m', 'Mujer']].map(([k, v]) =>
+          `<button class="chip ${(p.sexo || 'h') === k ? 'on' : ''}" data-act="prof-set" data-k="sexo" data-v="${k}">${v}</button>`).join('')}
+      </div>
+      <span class="tiny">Objetivo</span>
+      <div class="chips" style="margin:8px 0 16px">
+        ${Object.entries(OBJETIVOS).map(([k, v]) =>
+          `<button class="chip ${(p.objetivo || 'mantener') === k ? 'on' : ''}" data-act="prof-set" data-k="objetivo" data-v="${k}">${v.n}</button>`).join('')}
+      </div>
+      <span class="tiny">Nivel de actividad</span>
+      <div class="chips" style="margin:8px 0 0">
+        ${Object.entries(ACTIVIDADES).map(([k, v]) =>
+          `<button class="chip ${(p.actividad || 'medio') === k ? 'on' : ''}" data-act="prof-set" data-k="actividad" data-v="${k}">${v.n}</button>`).join('')}
+      </div>
     </div>
 
     <div class="section-head"><h2>Peso corporal</h2></div>
     <div class="card">
-      <div class="row nowrap" style="margin-bottom:10px">
+      <div class="row nowrap" style="margin-bottom:6px">
         <input type="date" id="bw-date" value="${todayISO()}" min="${daysAgoISO(3650)}" max="${todayISO()}" style="width:auto" aria-label="Fecha">
         <input id="bw-kg" class="grow" inputmode="decimal" placeholder="kg" aria-label="Peso">
         <button class="primary" data-act="add-bw" aria-label="Añadir peso">${icon('mas', 18)}</button>
       </div>
-      ${bw.slice(0, 8).map(x => `<div class="ex-line"><span>${cap(fshort(x.date))}</span>
+      ${bw.slice(0, 6).map(x => `<div class="ex-line"><span>${cap(fshort(x.date))}</span>
         <span><b class="num">${fmt(x.kg)} kg</b>
-        <button class="icon-btn ghost sm" data-act="del-bw" data-id="${x.id}" aria-label="Borrar">${icon('papelera', 15)}</button></span></div>`).join('')
-        || '<p class="muted small">Todavía no has apuntado ningún peso.</p>'}
+        <button class="icon-btn ghost sm" data-act="del-bw" data-id="${x.id}" aria-label="Borrar">${icon('papelera', 15)}</button></span></div>`).join('')}
     </div>
 
-    <div class="section-head"><h2>Herramientas</h2></div>
+    <div class="section-head"><h2>Entreno</h2></div>
     <div class="card">
-      <button class="block" data-act="discos" data-kg="60">${icon('peso', 18)} Calculadora de discos</button>
+      <div class="field-row">
+        <label><span>Objetivo semanal</span><input data-prof="weeklyGoal" inputmode="numeric" value="${weeklyGoal()}"></label>
+        <label><span>Descanso (seg)</span><input data-prof="restSec" inputmode="numeric" value="${restSec()}"></label>
+      </div>
+      <button class="block ghost" data-act="discos" data-kg="60">${icon('peso', 18)} Calculadora de discos</button>
     </div>
 
-    <div class="section-head"><h2>Cuenta y privacidad</h2></div>
+    <div class="section-head"><h2>Ajustes</h2></div>
     <div class="card">
-      ${nube ? `
-        <div class="row nowrap" style="margin-bottom:10px">${icon('nube', 20)}
-          <div class="grow"><b>Sincronizado</b><div class="muted small">${esc(store.user?.email || '')}</div></div></div>
-        <div class="row nowrap" style="margin-bottom:12px">${icon('candado', 20)}
-          <div class="grow"><b>App privada</b><div class="muted small">Solo tu cuenta puede entrar.</div></div></div>
-        <button class="block" data-act="logout">${icon('salir', 18)} Cerrar sesión</button>`
-      : `<div class="row nowrap" style="margin-bottom:12px">${icon('usuario', 20)}<div class="grow">
-            <b>Cuenta de este dispositivo${nombreCuenta() ? `: ${esc(nombreCuenta())}` : ''}</b>
-            <div class="muted small">Te pide la contraseña al abrir la app y cada 7 días.
-              Es un candado sencillo: evita que alguien curiosee, pero no cifra los entrenos.
-              Protección de verdad = modo nube con Firebase.</div></div></div>
-          <div class="row">
-            <button class="grow" data-act="cambiar-pass">${icon('candado', 18)} Cambiar contraseña</button>
-            <button class="grow" data-act="logout-local">${icon('salir', 18)} Cerrar sesión</button>
-          </div>
-          <p class="tiny" style="margin:12px 0 0">Para sincronizar con el móvil y proteger los datos de verdad, configura Firebase.</p>`}
+      <div class="fila">
+        ${icon('ajustes', 20)}
+        <div class="fila-txt"><b>Fotos de fondo</b><span>Se descargan una vez y se guardan</span></div>
+        <button class="sm ${p.fotos === false ? '' : 'on'}" data-act="toggle-fotos">${p.fotos === false ? 'Desactivadas' : 'Activadas'}</button>
+      </div>
+      <div class="fila">
+        ${icon(nube ? 'nube' : 'usuario', 20)}
+        <div class="fila-txt"><b>${nube ? 'Sincronizado' : 'Cuenta de este dispositivo'}</b>
+          <span>${nube ? esc(store.user?.email || '') : 'Te pide la contraseña al abrir y cada 7 días'}</span></div>
+      </div>
+      <div class="row" style="margin-top:6px">
+        ${nube ? `<button class="grow" data-act="logout">${icon('salir', 18)} Cerrar sesión</button>`
+          : `<button class="grow" data-act="cambiar-pass">${icon('candado', 18)} Contraseña</button>
+             <button class="grow" data-act="logout-local">${icon('salir', 18)} Salir</button>`}
+      </div>
     </div>
 
     <div class="section-head"><h2>Copia de seguridad</h2></div>
     <div class="card">
       <div class="row">
-        <button class="grow" data-act="export">${icon('bajar', 18)} Exportar</button>
-        <label class="btn grow" style="margin:0;justify-content:center">${icon('subir', 18)} Importar
+        <button class="grow ghost" data-act="export">${icon('bajar', 18)} Exportar</button>
+        <label class="btn ghost grow" style="margin:0;justify-content:center">${icon('subir', 18)} Importar
           <input type="file" id="import-file" accept="application/json" hidden></label>
       </div>
     </div>
 
     <div class="card" id="install-card">
-      <div class="row nowrap">${icon('movil', 20)}<div class="grow"><b>Instalar en el dispositivo</b>
-        <div class="muted small" id="install-hint"></div></div></div>
+      <div class="fila">${icon('movil', 20)}
+        <div class="fila-txt"><b>Instalar la app</b><span id="install-hint"></span></div></div>
       <div id="install-slot"></div>
     </div>
-    <p class="tiny center" style="margin:18px 0 0">IRON · tu gimnasio, tus datos</p>
+  </div>`;
+}
+
+// ── Dieta ──
+function datosDieta() {
+  const p = profile();
+  return { ...p, pesoKg: latestWeight()?.kg };
+}
+function viewDieta() {
+  const d = datosDieta();
+  const nut = calcularNutricion(d);
+  if (!nut) {
+    const falta = [];
+    if (!d.pesoKg) falta.push('tu peso');
+    if (!d.heightCm) falta.push('tu altura');
+    if (!d.edad) falta.push('tu edad');
+    return `<div class="stagger">
+      <div class="foto-banda" data-foto="dieta"><div><h2>Dieta</h2><p>Dos planes hechos a tu medida</p></div></div>
+      <div class="card center">
+        <h3>Falta ${falta.join(' y ')}</h3>
+        <p class="muted small" style="margin:8px 0 14px">Con eso calculo tus calorías y te propongo dos dietas.</p>
+        <button class="primary" data-act="go" data-v="perfil">Completar perfil</button>
+      </div></div>`;
+  }
+  return `<div class="stagger">
+    <div class="foto-banda" data-foto="dieta"><div>
+      <h2>Tu dieta</h2><p>${nut.objetivo.n.toLowerCase()} · ${nut.kcal} kcal al día</p>
+    </div></div>
+
+    <div class="card">
+      <div class="macros" style="padding:0">
+        <div class="macro"><b>${nut.kcal}</b><span>kcal</span></div>
+        <div class="macro"><b>${nut.prot}</b><span>proteína</span></div>
+        <div class="macro"><b>${nut.carbs}</b><span>carbos</span></div>
+        <div class="macro"><b>${nut.grasa}</b><span>grasas</span></div>
+      </div>
+      <p class="muted small" style="margin:14px 0 0">Gastas unas ${nut.gasto} kcal al día. Para ${nut.objetivo.n.toLowerCase()},
+        comes ${nut.kcal}. ${nut.recortado ? 'No bajo de ahí: comer menos no es buena idea.' : ''}</p>
+    </div>
+
+    <div class="section-head"><h2>Elige tu plan</h2></div>
+    ${Object.values(PLANES).map(pl => `
+      <div class="dieta-card" data-act="go" data-v="plan" data-id="${pl.id}" role="button" style="cursor:pointer">
+        <div class="dieta-top ${pl.color}">
+          <div class="grow">
+            <h3>${pl.n}</h3>
+            <p class="muted small" style="margin:4px 0 10px">${pl.lema}</p>
+            <div class="chips">${pl.puntos.slice(0, 2).map(x => `<span class="chip sm">${x}</span>`).join('')}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="dieta-precio">${pl.precio.split(' ')[0]}</div>
+            <span class="tiny">€ / semana</span>
+          </div>
+        </div>
+      </div>`).join('')}
+
+    <p class="muted small">${AVISO_DIETA}</p>
+  </div>`;
+}
+
+function viewPlan() {
+  const pl = PLANES[S.route.id] || PLANES.sencilla;
+  const nut = calcularNutricion(datosDieta());
+  if (!nut) return `<div class="card"><p class="muted">Completa tu perfil primero.</p></div>`;
+  const comidas = pl.comidas(nut.kcal);
+  const total = pl.compra.reduce((a, [, precio]) => a + parseFloat(precio.replace(',', '.')), 0);
+  return `<div class="stagger">
+    <div class="section-head"><h2>${pl.n}</h2><span class="tiny">${nut.kcal} kcal</span></div>
+    <p class="muted small">${pl.lema}</p>
+
+    <div class="card" style="padding:0;overflow:hidden">
+      ${comidas.map(c => `
+        <div class="comida">
+          <div class="comida-h"><b>${c.n}</b><span>${Math.round((nut.kcal * c.pct) / 100)} kcal</span></div>
+          <ul>${c.items.map(([qué, nota]) => `<li>${esc(qué)}${nota ? ` <span class="muted">(${esc(nota)})</span>` : ''}</li>`).join('')}</ul>
+        </div>`).join('')}
+    </div>
+
+    <div class="section-head"><h2>Lista de la compra</h2><span class="tiny">≈ ${fmt(total, 0)} € la semana</span></div>
+    <div class="card">
+      <div class="compra">${pl.compra.map(([x, precio]) => `<div>${esc(x)}<span>${precio}</span></div>`).join('')}</div>
+    </div>
+
+    <div class="section-head"><h2>Trucos</h2></div>
+    <div class="card">${pl.consejos.map(c => `<div class="tip">${icon('idea', 16)}<span>${esc(c)}</span></div>`).join('')}</div>
+
+    <div class="card aviso">${icon('alerta', 20)}<div class="small">${AVISO_DIETA}</div></div>
   </div>`;
 }
 
@@ -780,6 +872,7 @@ function render() {
       <p class="muted small">Tus datos siguen guardados.</p>
       <button class="primary block" data-act="go" data-v="inicio">Volver al inicio</button></div>`;
   }
+  pintarFotos(profile().fotos !== false);
   renderTabs();
   const atras = VOLVER[S.route.v];
   $('#back').classList.toggle('hidden', !atras);
@@ -806,42 +899,90 @@ const openDialog = html => { $('#dlg-body').innerHTML = `<div class="sheet-grip"
 const closeDialog = () => dlg.close();
 dlg.addEventListener('click', e => { if (e.target === dlg) closeDialog(); });
 
-function selectorEjercicios(titulo, act, marcados = []) {
+function selectorEjercicios(titulo, act) {
   return `<h2>${titulo}</h2>
     <div class="buscador" style="margin:12px 0">
-      ${icon('buscar', 18)}<input id="ex-search" class="grow" placeholder="Buscar…" autocomplete="off"></div>
-    <div id="ex-list" class="lista-sel">${GROUPS.map(g => {
-      const list = allEx().filter(e => e.g === g);
-      if (!list.length) return '';
-      return `<div class="ex-group">
-        <span class="tag m" style="--mc:${GROUP_COLOR[g]}">${g}</span>
-        <div class="chips" style="margin-top:7px">${list.map(e => `
-          <button class="chip ${marcados.includes(e.id) ? 'on' : ''}" data-act="${act}" data-id="${e.id}"
-            data-name="${esc(sinAcentos(e.n))}">${esc(e.n)}</button>`).join('')}</div></div>`;
-    }).join('')}</div>`;
+      ${icon('buscar', 18)}<input id="ex-search" class="grow" placeholder="Buscar" autocomplete="off"></div>
+    <div id="ex-list" class="lista-sel">
+      ${allEx().map(e => `
+        <button class="sel-fila" data-act="${act}" data-id="${e.id}" data-name="${esc(sinAcentos(e.n + ' ' + e.g))}">
+          <div class="mini-fig" style="width:38px;height:34px">${exerciseSVG(e.pose, { anim: false })}</div>
+          <div class="ex-fila-txt"><b>${esc(e.n)}</b><span>${esc(e.g)}</span></div>
+        </button>`).join('')}
+    </div>`;
 }
 
+// Creador de rutinas en tres pasos: nombre, ejercicios y orden
 function editorRutina(r) {
-  S.pick = [...(r?.exerciseIds || [])];
-  openDialog(`
-    <label><span>Nombre de la rutina</span>
-      <input id="rt-name" value="${esc(r?.name || '')}" maxlength="60" placeholder="Ej: Día de pecho"></label>
-    <label><span>Día de la semana (opcional)</span>
-      <select id="rt-dia">
-        <option value="">Sin día fijo</option>
-        ${DIAS.slice(1).map((d, i) => `<option value="${i + 1}" ${r?.dia === i + 1 ? 'selected' : ''}>${d}</option>`).join('')}
-      </select></label>
-    <span class="tiny">Ejercicios elegidos</span>
-    <ol id="rt-order" class="small lista-orden"></ol>
-    ${selectorEjercicios('Toca para añadir o quitar', 'toggle-pick', S.pick)}
-    <div class="row" style="margin-top:16px">
-      <button class="primary grow" data-act="save-routine" data-id="${r?.id || ''}">Guardar rutina</button>
-      <button class="ghost" data-act="close">Cancelar</button></div>`);
-  pintarOrden();
+  S.rt = { id: r?.id || '', name: r?.name || '', dia: r?.dia || 0, ex: [...(r?.exerciseIds || [])], paso: 1, grupo: '', q: '' };
+  openDialog('<div id="rt-cuerpo"></div>');
+  pintarEditorRutina();
 }
-function pintarOrden() {
-  const ol = $('#rt-order');
-  if (ol) ol.innerHTML = S.pick.map(id => `<li>${esc(exName(id))}</li>`).join('') || '<li class="muted">Ninguno todavía</li>';
+
+function pintarEditorRutina() {
+  const t = S.rt, cont = $('#rt-cuerpo');
+  if (!cont) return;
+  const puntos = `<div class="pasos-rutina">${[1, 2, 3].map(x => `<i class="paso-punto ${x <= t.paso ? 'on' : ''}"></i>`).join('')}</div>`;
+
+  if (t.paso === 1) {
+    cont.innerHTML = `${puntos}
+      <h2>${t.id ? 'Editar rutina' : 'Nueva rutina'}</h2>
+      <label style="margin-top:14px"><span>Nombre</span>
+        <input id="rt-name" value="${esc(t.name)}" maxlength="60" placeholder="Día de pecho"></label>
+      <span class="tiny">¿Qué día la haces?</span>
+      <div class="chips" style="margin:8px 0 20px">
+        <button class="chip ${!t.dia ? 'on' : ''}" data-act="rt-dia" data-d="0">Sin día</button>
+        ${DIAS.slice(1).map((d, x) => `<button class="chip ${t.dia === x + 1 ? 'on' : ''}" data-act="rt-dia" data-d="${x + 1}">${d.slice(0, 3)}</button>`).join('')}
+      </div>
+      <button class="primary block big" data-act="rt-siguiente">Elegir ejercicios</button>`;
+    setTimeout(() => $('#rt-name')?.focus(), 80);
+    return;
+  }
+
+  if (t.paso === 2) {
+    const q = sinAcentos(t.q);
+    const lista = allEx().filter(e =>
+      (!t.grupo || e.g === t.grupo) &&
+      (!q || sinAcentos(e.n).includes(q) || e.m.some(m => sinAcentos(MUSCLES[m] || '').includes(q))));
+    cont.innerHTML = `${puntos}
+      <div class="row between"><h2>Ejercicios</h2><span class="tiny">${t.ex.length} elegidos</span></div>
+      <div class="buscador" style="margin:12px 0">
+        ${icon('buscar', 18)}<input id="rt-q" class="grow" value="${esc(t.q)}" placeholder="Buscar" autocomplete="off"></div>
+      <div class="chips scroll-x" style="margin-bottom:10px">
+        <button class="chip ${!t.grupo ? 'on' : ''}" data-act="rt-grupo" data-g="">Todos</button>
+        ${GROUPS.map(g => `<button class="chip ${t.grupo === g ? 'on' : ''}" data-act="rt-grupo" data-g="${g}">${g}</button>`).join('')}
+      </div>
+      <div class="lista-sel">
+        ${lista.map(e => `
+          <button class="sel-fila ${t.ex.includes(e.id) ? 'on' : ''}" data-act="rt-toggle" data-id="${e.id}">
+            <span class="sel-check">${icon('check', 15)}</span>
+            <div class="mini-fig" style="width:38px;height:34px">${exerciseSVG(e.pose, { anim: false })}</div>
+            <div class="ex-fila-txt"><b>${esc(e.n)}</b><span>${esc(e.g)}</span></div>
+          </button>`).join('') || '<p class="muted small" style="padding:14px 0">Nada con ese filtro.</p>'}
+      </div>
+      <div class="row" style="margin-top:16px">
+        <button class="ghost" data-act="rt-atras">Atrás</button>
+        <button class="primary grow" data-act="rt-siguiente" ${t.ex.length ? '' : 'disabled'}>Ordenar (${t.ex.length})</button>
+      </div>`;
+    return;
+  }
+
+  cont.innerHTML = `${puntos}
+    <div class="row between"><h2>Orden</h2><span class="tiny">${t.ex.length} ejercicios</span></div>
+    <ol class="orden-lista">
+      ${t.ex.map((id, x) => `
+        <li class="orden-item">
+          <span class="num-orden">${x + 1}</span>
+          <span class="grow">${esc(exName(id))}</span>
+          <button class="icon-btn ghost" data-act="rt-sube" data-i="${x}" ${x === 0 ? 'disabled' : ''} aria-label="Subir">${icon('subir', 16)}</button>
+          <button class="icon-btn ghost" data-act="rt-baja" data-i="${x}" ${x === t.ex.length - 1 ? 'disabled' : ''} aria-label="Bajar">${icon('bajar', 16)}</button>
+          <button class="icon-btn ghost" data-act="rt-quita" data-i="${x}" aria-label="Quitar">${icon('cerrar', 16)}</button>
+        </li>`).join('')}
+    </ol>
+    <div class="row" style="margin-top:18px">
+      <button class="ghost" data-act="rt-atras">Atrás</button>
+      <button class="primary grow" data-act="rt-guardar">Guardar rutina</button>
+    </div>`;
 }
 
 function dialogoDiscos(kg) {
@@ -964,7 +1105,7 @@ const actions = {
   },
   'add-to-routine': el => {
     const id = el.dataset.id;
-    if (!S.data.routines.length) { S.pick = [id]; return editorRutina(null); }
+    if (!S.data.routines.length) { editorRutina(null); S.rt.ex = [id]; return; }
     openDialog(`<h2>Añadir a una rutina</h2>
       <p class="muted small">${esc(exName(id))}</p>
       <div class="stack" style="margin-top:12px">
@@ -1116,17 +1257,33 @@ const actions = {
   },
 
   'edit-routine': el => editorRutina(S.data.routines.find(r => r.id === el.dataset.id)),
-  'toggle-pick': el => {
-    const id = el.dataset.id, i = S.pick.indexOf(id);
-    i >= 0 ? S.pick.splice(i, 1) : S.pick.push(id);
-    el.classList.toggle('on', i < 0);
-    pintarOrden();
+  'rt-dia': el => { S.rt.dia = +el.dataset.d; S.rt.name = $('#rt-name')?.value ?? S.rt.name; pintarEditorRutina(); },
+  'rt-siguiente': () => {
+    if (S.rt.paso === 1) {
+      S.rt.name = ($('#rt-name')?.value || '').trim();
+      if (!S.rt.name) return toast('Ponle un nombre');
+    }
+    S.rt.paso++; pintarEditorRutina();
+    $('#dlg-body').scrollTop = 0;
   },
-  'save-routine': el => {
-    const name = $('#rt-name').value.trim();
-    if (!name) return toast('Ponle nombre a la rutina');
-    if (!S.pick.length) return toast('Elige al menos un ejercicio');
-    upsert('routines', { id: el.dataset.id || uid(), name, dia: num($('#rt-dia').value) || null, exerciseIds: [...S.pick] });
+  'rt-atras': () => { S.rt.paso--; pintarEditorRutina(); },
+  'rt-grupo': el => { S.rt.grupo = el.dataset.g; pintarEditorRutina(); },
+  'rt-toggle': el => {
+    const id = el.dataset.id, i = S.rt.ex.indexOf(id);
+    i >= 0 ? S.rt.ex.splice(i, 1) : S.rt.ex.push(id);
+    el.classList.toggle('on', i < 0);
+    const c = $('#rt-cuerpo')?.querySelector('.tiny');
+    if (c) c.textContent = `${S.rt.ex.length} elegidos`;
+    const b = $('[data-act="rt-siguiente"]');
+    if (b) { b.disabled = !S.rt.ex.length; b.textContent = `Ordenar (${S.rt.ex.length})`; }
+  },
+  'rt-sube': el => { const i = +el.dataset.i, e = S.rt.ex; [e[i - 1], e[i]] = [e[i], e[i - 1]]; pintarEditorRutina(); },
+  'rt-baja': el => { const i = +el.dataset.i, e = S.rt.ex; [e[i + 1], e[i]] = [e[i], e[i + 1]]; pintarEditorRutina(); },
+  'rt-quita': el => { S.rt.ex.splice(+el.dataset.i, 1); pintarEditorRutina(); },
+  'rt-guardar': () => {
+    const t = S.rt;
+    if (!t.ex.length) return toast('Elige al menos un ejercicio');
+    upsert('routines', { id: t.id || uid(), name: t.name, dia: t.dia || null, exerciseIds: [...t.ex] });
     closeDialog(); render(); toast('Rutina guardada');
   },
   'del-routine': el => { if (confirm('¿Borrar esta rutina? Tus entrenos no se borran.')) { remove('routines', el.dataset.id); render(); } },
@@ -1167,6 +1324,15 @@ const actions = {
     go('ejercicios');
   },
 
+  'prof-set': el => {
+    profile()[el.dataset.k] = el.dataset.v;
+    saveProfile(); render();
+  },
+  'toggle-fotos': () => {
+    profile().fotos = profile().fotos === false;
+    saveProfile(); render();
+    toast(profile().fotos === false ? 'Fotos desactivadas' : 'Fotos activadas');
+  },
   'add-bw': () => {
     const kg = num($('#bw-kg').value);
     if (kg < 20 || kg > 400) return toast('Pon un peso válido en kg');
@@ -1288,10 +1454,15 @@ document.addEventListener('input', e => {
     S.filtro.q = t.value;
     clearTimeout(t._t);
     t._t = setTimeout(() => { const pos = t.selectionStart; render(); const n = $('#q'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 220);
+  } else if (t.id === 'rt-q') {
+    S.rt.q = t.value;
+    clearTimeout(t._t);
+    t._t = setTimeout(() => { const pos = t.selectionStart; pintarEditorRutina(); const x = $('#rt-q'); if (x) { x.focus(); x.setSelectionRange(pos, pos); } }, 200);
+  } else if (t.id === 'rt-name') {
+    S.rt.name = t.value;
   } else if (t.id === 'ex-search') {
     const q = sinAcentos(t.value.trim());
     document.querySelectorAll('#ex-list [data-name]').forEach(b => b.classList.toggle('hidden', !b.dataset.name.includes(q)));
-    document.querySelectorAll('#ex-list .ex-group').forEach(g => g.classList.toggle('hidden', !g.querySelector('[data-name]:not(.hidden)')));
   }
 });
 
@@ -1301,7 +1472,8 @@ document.addEventListener('change', async e => {
     const k = t.dataset.prof;
     if (k === 'name') profile().name = t.value.trim().slice(0, 40);
     else {
-      const LIM = { heightCm: [100, 250, 'la altura en cm'], weeklyGoal: [1, 14, 'el objetivo semanal'], restSec: [10, 600, 'el descanso en segundos'] }[k];
+      const LIM = { heightCm: [100, 250, 'la altura en cm'], weeklyGoal: [1, 14, 'el objetivo semanal'],
+        restSec: [10, 600, 'el descanso en segundos'], edad: [14, 99, 'la edad'] }[k];
       if (t.value.trim() === '') profile()[k] = '';
       else {
         const v = num(t.value);

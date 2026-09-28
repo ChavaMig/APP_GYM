@@ -42,6 +42,10 @@ const P = {
   alerta: '<path d="M12 4 2.5 20h19z"/><path d="M12 10v4M12 17.5h.01"/>',
   'mas-opciones': '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
   regla: '<path d="M2.5 9.5h19v5h-19z"/><path d="M7 9.5v3M12 9.5v3M17 9.5v3"/>',
+  dieta: '<path d="M6 3v7a3 3 0 0 0 6 0V3M9 10v11"/><path d="M17.5 3c-1.4 1.6-2 3.4-2 5.5 0 1.6.7 2.8 2 3.2V21"/>',
+  cesta: '<path d="M3 8h18l-1.6 11.2a2 2 0 0 1-2 1.8H6.6a2 2 0 0 1-2-1.8z"/><path d="M8.5 8 12 2.8 15.5 8"/>',
+  fuego2: '<path d="M12 22a6 6 0 0 0 6-6c0-4-3.5-6-4.5-10-1.5 1.2-2.5 3-2.5 5 0 1-1 1.4-1.6.8C8 10.6 8 9 8 9c-1.5 2-2 4-2 7a6 6 0 0 0 6 6z"/>',
+  ajustes: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>',
 };
 export function icon(name, size = 22, cls = '') {
   return `<svg class="ico ${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"
