@@ -1,6 +1,6 @@
 // Service worker: la app abre sin conexión.
 // Cada vez que cambies archivos, sube este numero (v6, v7...).
-const VERSION = 'iron-v10';
+const VERSION = 'iron-v11';
 const APP_FILES = [
   './', './index.html', './style.css', './app.js', './ui.js', './store.js', './firebase-config.js',
   './db.js', './anim.js', './auth.js', './dieta.js', './fotos.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png',

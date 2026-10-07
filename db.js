@@ -54,7 +54,7 @@ export const EXERCISES = [
      'Empuja hacia arriba y ligeramente hacia dentro.',
      'Baja controlado hasta el estiramiento.'],
     ['Ideal para trabajar la parte alta del pecho.'], []),
-  E('press-declinado', 'Press declinado', 'Pecho', ['pecho', 'triceps'], 'barra', 'press-banco', 2,
+  E('press-declinado', 'Press declinado', 'Pecho', ['pecho', 'triceps'], 'barra', 'press-declinado', 2,
     ['Banco declinado, pies sujetos.', 'Baja la barra a la parte baja del pecho.', 'Empuja hasta estirar.'],
     ['Suele permitir algo más de peso que el press plano.'], []),
   E('aperturas-mancuernas', 'Aperturas con mancuernas', 'Pecho', ['pecho'], 'mancuerna', 'aperturas', 1,

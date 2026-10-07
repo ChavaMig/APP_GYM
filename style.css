@@ -431,9 +431,12 @@ dialog::backdrop { background: rgba(10, 11, 14, .72); backdrop-filter: blur(4px)
 .exfig { width: 100%; height: auto; display: block; color: var(--muted); }
 .exfig .lm { fill: #58616e; }
 .exfig .lm2 { fill: #4a525e; }
+.exfig .lm3 { fill: #6d7786; }
 .exfig .piel { fill: #6b7482; }
 .exfig .sup { fill: #2b313b; }
 .exfig .eq { fill: var(--accent); }
+.exfig .hueco { fill: var(--surface); }
+.exfig.en-ficha .hueco, .ficha-hero .exfig .hueco { fill: var(--bg-alto); }
 .exfig .j { transform-box: view-box; transform: rotate(var(--a)); }
 .exfig.anim .j { animation: giro var(--dur, 2.4s) cubic-bezier(.45, .05, .35, 1) infinite alternate; }
 @keyframes giro { from { transform: rotate(var(--a)); } to { transform: rotate(var(--b)); } }

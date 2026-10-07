@@ -35,6 +35,24 @@ export function calcularNutricion(p) {
   return { tmb: Math.round(tmb), gasto: Math.round(gasto), kcal, prot, grasa, carbs, objetivo: obj, recortado };
 }
 
+// Un kilo de grasa corporal son unas 7700 kcal: con eso se estima
+// cuánto se bajaría o subiría a la semana con cada objetivo.
+export const KCAL_POR_KILO = 7700;
+
+export function escenarios(p) {
+  const base = calcularNutricion({ ...p, objetivo: 'mantener' });
+  if (!base) return null;
+  return Object.entries(OBJETIVOS).map(([id, o]) => {
+    const n = calcularNutricion({ ...p, objetivo: id });
+    const dif = n.kcal - base.gasto;
+    return {
+      id, n: o.n, desc: o.desc, kcal: n.kcal, dif,
+      kgSemana: (dif * 7) / KCAL_POR_KILO,
+      prot: n.prot, carbs: n.carbs, grasa: n.grasa, recortado: n.recortado,
+    };
+  });
+}
+
 // Los gramos están pensados para 2000 kcal y se ajustan a las tuyas
 const esc = (g, kcal) => Math.round((g * kcal) / 2000 / 5) * 5 || Math.max(1, Math.round((g * kcal) / 2000));
 

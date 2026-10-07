@@ -4,8 +4,8 @@ import { EXERCISES, PLANTILLAS, SEMANA, DIAS, GROUPS, EQUIP, MUSCLES, VOLUMEN_OB
 import { hayCuenta, haySesion, nombreCuenta, registrar, entrar, salir, cambiarPassword, quitarCuenta, renovarSesion, cifradoDisponible } from './auth.js';
 import { exerciseSVG } from './anim.js';
 import { pintarFotos } from './fotos.js';
-import { OBJETIVOS, ACTIVIDADES, PLANES, calcularNutricion, AVISO_DIETA } from './dieta.js';
-import { icon, injectDefs, lineChart, weekBars, goalRing, bodyMap, calendarHeat, plateView, celebrate } from './ui.js';
+import { OBJETIVOS, ACTIVIDADES, PLANES, calcularNutricion, escenarios, AVISO_DIETA } from './dieta.js';
+import { icon, injectDefs, lineChart, weekBars, goalRing, bodyMap, calendarHeat, celebrate } from './ui.js';
 
 // ═══════════ Utilidades ═══════════
 const $ = s => document.querySelector(s);
@@ -159,15 +159,6 @@ function bmi() {
   const c = v < 18.5 ? ['Bajo peso', 'var(--info)'] : v < 25 ? ['Normal', 'var(--ok)'] : v < 30 ? ['Sobrepeso', 'var(--accent-2)'] : ['Obesidad', 'var(--danger)'];
   return { v, cat: c };
 }
-// Discos por lado para llegar a un peso
-function discos(objetivo, barra = 20) {
-  if (!(objetivo > 0) || objetivo > 1000) return null;
-  const disponibles = [25, 20, 15, 10, 5, 2.5, 1.25];
-  let porLado = (objetivo - barra) / 2, out = [];
-  if (porLado < 0) return null;
-  for (const d of disponibles) while (porLado >= d - 0.001) { out.push(d); porLado = Math.round((porLado - d) * 100) / 100; }
-  return { discos: out, sobra: porLado };
-}
 
 // ═══════════ Navegación ═══════════
 const TABS = [
@@ -179,7 +170,7 @@ const TABS = [
   ['perfil', 'Perfil', 'usuario'],
 ];
 function go(v, id) { S.route = { v, id }; render(); scrollTo({ top: 0 }); }
-const VOLVER = { ejercicio: 'ejercicios', historial: 'inicio', calendario: 'progreso', plantillas: 'entrenar', plan: 'dieta' };
+const VOLVER = { ejercicio: 'ejercicios', historial: 'inicio', calendario: 'progreso', plantillas: 'entrenar', plan: 'dieta', energia: 'dieta' };
 const aDondeVuelvo = () => (S.route.v === 'ejercicio' && S.active ? 'entrenar' : VOLVER[S.route.v] || 'inicio');
 
 function renderTabs() {
@@ -202,6 +193,7 @@ const views = {
   plantillas: viewPlantillas,
   dieta: viewDieta,
   plan: viewPlan,
+  energia: viewEnergia,
 };
 
 // ── Portada ──
@@ -253,11 +245,17 @@ function viewInicio() {
         <div class="fila-txt"><b>Tu dieta</b><span>${nut.kcal} kcal · ${nut.prot} g de proteína al día</span></div>
         ${icon('derecha', 18, 'chev')}
       </div>`
-      : `<div class="card fila" data-act="go" data-v="perfil" role="button" style="cursor:pointer">
+      : `<div class="card fila" data-act="go" data-v="energia" role="button" style="cursor:pointer">
         ${icon('dieta', 22)}
-        <div class="fila-txt"><b>Calcula tu dieta</b><span>Completa tu perfil y te propongo dos planes</span></div>
+        <div class="fila-txt"><b>Calcula tus calorías</b><span>Pon peso y altura y te digo lo que gastas y lo que comer</span></div>
         ${icon('derecha', 18, 'chev')}
       </div>`}
+
+    ${nut ? `<div class="card fila" data-act="go" data-v="energia" role="button" style="cursor:pointer">
+        ${icon('fuego2', 22)}
+        <div class="fila-txt"><b>Calorías que gastas</b><span>${nut.gasto} kcal al día · en reposo ${nut.tmb}</span></div>
+        ${icon('derecha', 18, 'chev')}
+      </div>` : ''}
 
     <div class="section-head"><h2>Tu semana</h2><span class="tiny">kg por día</span></div>
     <div class="card">${weekBars(values, labels)}</div>
@@ -430,7 +428,6 @@ function exCard(en, ei) {
         <div class="row" style="margin-top:8px">
           <button class="sm grow" data-act="add-set" data-ei="${ei}">${icon('mas', 15)} Serie</button>
           ${en.sets.length ? `<button class="sm ghost" data-act="del-set" data-ei="${ei}" aria-label="Quitar serie">${icon('menos', 15)}</button>` : ''}
-          ${num(en.sets[0]?.kg) > 0 ? `<button class="sm ghost" data-act="discos" data-kg="${num(en.sets[0].kg)}">${icon('peso', 15)} Discos</button>` : ''}
         </div>
       </div>
     </div>`;
@@ -525,7 +522,6 @@ function viewFichaEjercicio() {
       <span class="tiny">Objetivo de hoy</span>
       <h3 style="margin:2px 0 2px">${sug.kg ? fmt(sug.kg) + ' kg × ' + sug.reps : sug.reps + ' repeticiones'}</h3>
       <span class="muted small">${esc(sug.motivo)}</span>
-      ${sug.kg ? `<button class="sm ghost" style="margin-top:10px" data-act="discos" data-kg="${sug.kg}">Ver discos</button>` : ''}
     </div>` : ''}
 
     ${est >= 2 ? `<div class="card aviso">${icon('alerta', 20)}
@@ -734,7 +730,13 @@ function viewPerfil() {
         <label><span>Objetivo semanal</span><input data-prof="weeklyGoal" inputmode="numeric" value="${weeklyGoal()}"></label>
         <label><span>Descanso (seg)</span><input data-prof="restSec" inputmode="numeric" value="${restSec()}"></label>
       </div>
-      <button class="block ghost" data-act="discos" data-kg="60">${icon('peso', 18)} Calculadora de discos</button>
+    </div>
+
+    <div class="section-head"><h2>Calorías</h2></div>
+    <div class="card">
+      <button class="block ghost" data-act="go" data-v="energia">${icon('fuego2', 18)} Calculadora de calorías</button>
+      <p class="muted small" style="margin:10px 0 0">Con tu peso, altura, edad y sexo calcula lo que gastas al día
+        y cuánto comer para perder grasa, mantenerte o ganar músculo.</p>
     </div>
 
     <div class="section-head"><h2>Ajustes</h2></div>
@@ -778,6 +780,93 @@ function datosDieta() {
   const p = profile();
   return { ...p, pesoKg: latestWeight()?.kg };
 }
+// ── Calculadora de calorías ──
+function viewEnergia() {
+  const p = profile(), d = datosDieta(), nut = calcularNutricion(d), esc3 = escenarios(d), b = bmi();
+  const campos = `
+    <div class="card">
+      <div class="field-row">
+        <label><span>Altura (cm)</span><input data-prof="heightCm" inputmode="decimal" value="${esc(p.heightCm)}" placeholder="178"></label>
+        <label><span>Edad</span><input data-prof="edad" inputmode="numeric" value="${esc(p.edad)}" placeholder="28"></label>
+      </div>
+      <div class="row nowrap" style="margin:4px 0 16px">
+        <input type="date" id="bw-date" value="${todayISO()}" min="${daysAgoISO(3650)}" max="${todayISO()}" style="width:auto" aria-label="Fecha">
+        <input id="bw-kg" class="grow" inputmode="decimal" placeholder="Peso de hoy (kg)" aria-label="Peso">
+        <button class="primary" data-act="add-bw" aria-label="Guardar peso">${icon('mas', 18)}</button>
+      </div>
+      <span class="tiny">Sexo</span>
+      <div class="chips" style="margin:8px 0 16px">
+        ${[['h', 'Hombre'], ['m', 'Mujer']].map(([k, v]) =>
+          `<button class="chip ${(p.sexo || 'h') === k ? 'on' : ''}" data-act="prof-set" data-k="sexo" data-v="${k}">${v}</button>`).join('')}
+      </div>
+      <span class="tiny">Cuánto te mueves al día</span>
+      <div class="chips" style="margin:8px 0 0">
+        ${Object.entries(ACTIVIDADES).map(([k, v]) =>
+          `<button class="chip ${(p.actividad || 'medio') === k ? 'on' : ''}" data-act="prof-set" data-k="actividad" data-v="${k}" title="${v.desc}">${v.n}</button>`).join('')}
+      </div>
+    </div>`;
+
+  if (!nut) {
+    const falta = [];
+    if (!d.pesoKg) falta.push('tu peso');
+    if (!d.heightCm) falta.push('tu altura');
+    if (!d.edad) falta.push('tu edad');
+    return `<div class="stagger">
+      <div class="foto-banda" data-foto="dieta"><div><h2>Calorías</h2><p>Lo que gastas y lo que necesitas comer</p></div></div>
+      <p class="muted small">Rellena ${falta.join(' y ')} y lo calculo al momento.</p>
+      ${campos}</div>`;
+  }
+
+  const kgs = n => (n >= 0 ? '+' : '−') + fmt(Math.abs(n)).replace('.', ',');
+  return `<div class="stagger">
+    <div class="foto-banda" data-foto="dieta"><div>
+      <h2>Calorías</h2><p>Gastas unas ${nut.gasto} kcal al día</p>
+    </div></div>
+
+    <div class="card">
+      <div class="macros" style="padding:0;grid-template-columns:repeat(3,1fr)">
+        <div class="macro"><b>${nut.tmb}</b><span>en reposo</span></div>
+        <div class="macro"><b>${nut.gasto}</b><span>al día</span></div>
+        <div class="macro"><b>${b ? fmt(b.v) : '—'}</b><span>IMC</span></div>
+      </div>
+      <p class="muted small" style="margin:14px 0 0">En reposo tu cuerpo quema ${nut.tmb} kcal solo por estar vivo
+        (respirar, el corazón, el cerebro). Sumando lo que te mueves y entrenas, gastas unas <b>${nut.gasto} kcal</b> al día.
+        ${b ? `Con ${fmt(d.pesoKg)} kg y ${fmt(d.heightCm)} cm tu IMC es ${fmt(b.v)}: ${b.cat[0].toLowerCase()}.` : ''}</p>
+    </div>
+
+    <div class="section-head"><h2>Qué comer según lo que quieras</h2></div>
+    ${esc3.map(e => `
+      <div class="card ${(p.objetivo || 'mantener') === e.id ? 'accent-edge' : ''}">
+        <div class="row nowrap" style="align-items:flex-start">
+          <div class="grow">
+            <h3 style="margin:0">${e.n}</h3>
+            <span class="muted small">${e.desc}</span>
+          </div>
+          <div style="text-align:right;flex:0 0 auto">
+            <div class="dieta-precio">${e.kcal}</div><span class="tiny">kcal al día</span>
+          </div>
+        </div>
+        <div class="macros" style="padding:12px 0 0">
+          <div class="macro"><b>${e.prot} g</b><span>proteína</span></div>
+          <div class="macro"><b>${e.carbs} g</b><span>carbos</span></div>
+          <div class="macro"><b>${e.grasa} g</b><span>grasas</span></div>
+          <div class="macro"><b>${Math.abs(e.dif) < 25 ? '0' : kgs(e.kgSemana)}</b><span>kg/semana</span></div>
+        </div>
+        ${e.recortado ? '<p class="tiny" style="color:var(--accent-2);margin:10px 0 0">No bajo de este mínimo: comer menos no es seguro sin que te lo lleve un profesional.</p>' : ''}
+        ${(p.objetivo || 'mantener') === e.id
+          ? '<p class="tiny" style="margin:10px 0 0">Es tu objetivo ahora mismo.</p>'
+          : `<button class="sm block" style="margin-top:10px" data-act="prof-set" data-k="objetivo" data-v="${e.id}">Elegir este objetivo</button>`}
+      </div>`).join('')}
+
+    <button class="block primary" data-act="go" data-v="dieta">${icon('dieta', 18)} Ver los planes de comidas</button>
+
+    ${campos}
+
+    <p class="muted small">Calculado con la fórmula de Mifflin-St Jeor y un kilo de grasa equivalente a 7700 kcal.
+      Son estimaciones: dos personas con los mismos números pueden gastar un 10% más o menos. ${AVISO_DIETA}</p>
+  </div>`;
+}
+
 function viewDieta() {
   const d = datosDieta();
   const nut = calcularNutricion(d);
@@ -808,6 +897,7 @@ function viewDieta() {
       </div>
       <p class="muted small" style="margin:14px 0 0">Gastas unas ${nut.gasto} kcal al día. Para ${nut.objetivo.n.toLowerCase()},
         comes ${nut.kcal}. ${nut.recortado ? 'No bajo de ahí: comer menos no es buena idea.' : ''}</p>
+      <button class="sm block ghost" style="margin-top:12px" data-act="go" data-v="energia">Ver de dónde salen estos números</button>
     </div>
 
     <div class="section-head"><h2>Elige tu plan</h2></div>
@@ -983,19 +1073,6 @@ function pintarEditorRutina() {
       <button class="ghost" data-act="rt-atras">Atrás</button>
       <button class="primary grow" data-act="rt-guardar">Guardar rutina</button>
     </div>`;
-}
-
-function dialogoDiscos(kg) {
-  const barra = num(profile().barra) || 20;
-  const r = discos(kg, barra);
-  openDialog(`<h2>Calculadora de discos</h2>
-    <div class="field-row" style="margin-top:12px">
-      <label><span>Peso total (kg)</span><input id="dk" inputmode="decimal" maxlength="6" value="${fmt(kg)}"></label>
-      <label><span>Barra (kg)</span><input id="db" inputmode="decimal" value="${barra}"></label>
-    </div>
-    <button class="primary block" data-act="calc-discos">Calcular</button>
-    <div id="res-discos" style="margin-top:14px">${r ? plateView(r.discos, r.sobra, kg, barra) : '<p class="muted">Ese peso es menor que la barra.</p>'}</div>
-    <button class="block ghost" style="margin-top:12px" data-act="close">Cerrar</button>`);
 }
 
 // ═══════════ Descanso ═══════════
@@ -1232,14 +1309,6 @@ const actions = {
     toast(`Entreno guardado · ${kfmt(wVolume(w))} kg`, true);
   },
   discard: () => { if (confirm('¿Descartar el entreno en curso?')) { S.active = null; saveActive(); stopRest(); render(); } },
-
-  discos: el => dialogoDiscos(num(el.dataset.kg)),
-  'calc-discos': () => {
-    const kg = Math.min(1000, Math.max(0, num($('#dk').value))), barra = Math.min(50, Math.max(0, num($('#db').value) || 20));
-    profile().barra = barra; saveProfile();
-    const r = discos(kg, barra);
-    $('#res-discos').innerHTML = r ? plateView(r.discos, r.sobra, kg, barra) : '<p class="muted">Ese peso es menor que la barra.</p>';
-  },
 
   'prog-metric': el => { S.progMetric = el.dataset.m; render(); },
   filtro: el => {

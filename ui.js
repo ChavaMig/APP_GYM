@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════
 // IRON · piezas visuales: iconos, gráficas, mapa
-// muscular, calendario, discos y celebración.
+// muscular, calendario y celebración.
 // Todo dibujado a mano: sin librerías ni emojis.
 // ═══════════════════════════════════════════
 import { MUSCLES } from './db.js';
@@ -224,21 +224,6 @@ export function calendarHeat(dias, semanas = 26) {
     }
   }
   return `<svg class="cal" viewBox="0 0 ${W} ${H}" role="img" aria-label="Calendario de entrenos">${etiquetas}${out}</svg>`;
-}
-
-// ── Discos de la barra ──────────────────────
-const COLOR_DISCO = { 25: '#ff4d5e', 20: '#4da3ff', 15: '#ffb01f', 10: '#35d07f', 5: '#f3f5f8', 2.5: '#c77dff', 1.25: '#8d96a7' };
-export function plateView(discos, sobra, total, barra) {
-  const alto = d => 26 + d * 2.4;
-  return `<div class="plates">
-    <div class="bar-line"></div>
-    <div class="plate-row">
-      ${discos.map(d => `<div class="plate" style="height:${alto(d)}px;background:${COLOR_DISCO[d] || '#8d96a7'}"><span>${d}</span></div>`).join('')
-        || '<span class="muted small">Solo la barra</span>'}
-    </div>
-    <p class="small" style="margin:12px 0 0"><b>${fmtN(total)} kg</b> = barra de ${fmtN(barra)} kg
-      + ${discos.length ? discos.map(fmtN).join(' + ') + ' por lado' : 'nada'}.</p>
-    ${sobra > 0.01 ? `<p class="tiny" style="color:var(--accent-2)">Sobran ${fmtN(sobra * 2)} kg: no se puede montar exacto con discos normales.</p>` : ''}</div>`;
 }
 
 // ── Celebración de récord ───────────────────
